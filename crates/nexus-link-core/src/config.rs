@@ -100,7 +100,7 @@ impl Config {
 }
 
 fn default_push_interval() -> u64 {
-    30
+    10
 }
 
 fn default_listen_addr() -> String {

@@ -90,7 +90,7 @@ pub async fn execute(
         },
         api: ApiConfig {
             base_url: api_url,
-            push_interval_secs: 30,
+            push_interval_secs: 10,
         },
         service: ServiceConfig::default(),
     };
