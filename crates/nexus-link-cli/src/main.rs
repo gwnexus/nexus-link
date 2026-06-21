@@ -53,6 +53,13 @@ enum Commands {
     /// Show current node status
     Status,
 
+    /// Unregister this node and remove local credentials
+    Unregister {
+        /// Skip confirmation prompt and suppress errors
+        #[arg(long)]
+        force: bool,
+    },
+
     /// Upgrade nexus-link to the latest release
     Upgrade {
         /// Force re-download even if already on latest version
@@ -109,6 +116,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Status => commands::status::execute().await,
+        Commands::Unregister { force } => commands::unregister::execute(force).await,
         Commands::Upgrade { force } => commands::upgrade::execute(force).await,
         Commands::Agent { action } => match action {
             AgentAction::Start => commands::agent::start().await,

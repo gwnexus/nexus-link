@@ -39,6 +39,7 @@ jobs:
           - cli-help
           - cli-preflight
           - cli-register-validation
+          - cli-unregister
           - service-health
 
     steps:
@@ -110,6 +111,62 @@ jobs:
             echo "PASS: Unreachable API correctly fails registration"
           else
             echo "FAIL: Registration should not succeed against invalid API"
+            exit 1
+          fi
+
+      # -- Scenario: Unregister command --
+      - name: "Test: Unregister command"
+        if: matrix.scenario == 'cli-unregister'
+        run: |
+          # Test 1: Unregister with no config (no --force) should fail with exit 1
+          set +e
+          OUTPUT=$(./target/debug/nexus-link unregister 2>&1)
+          EXIT_CODE=$?
+          set -e
+          if [ "$EXIT_CODE" -ne 0 ] && echo "$OUTPUT" | grep -q "not registered"; then
+            echo "PASS: Unregister correctly fails when no config exists"
+          else
+            echo "FAIL: Expected 'not registered' error"
+            echo "Output: $OUTPUT"
+            exit 1
+          fi
+
+          # Test 2: Unregister with --force and no config should succeed (exit 0)
+          set +e
+          OUTPUT=$(./target/debug/nexus-link unregister --force 2>&1)
+          EXIT_CODE=$?
+          set -e
+          if [ "$EXIT_CODE" -eq 0 ]; then
+            echo "PASS: Unregister --force succeeds with no config"
+          else
+            echo "FAIL: --force should not fail (exit $EXIT_CODE)"
+            echo "Output: $OUTPUT"
+            exit 1
+          fi
+
+          # Test 3: Create a config, then unregister --force should remove it
+          mkdir -p ~/.nexus-link
+          cat > ~/.nexus-link/config.toml << 'EOF'
+          [node]
+          node_id = "test-node-unregister"
+          name = "ci-test-node"
+          token = "nxs_node_ci_test_token"
+          tags = []
+
+          [api]
+          base_url = "https://nonexistent.invalid"
+          push_interval_secs = 30
+
+          [service]
+          listen_addr = "127.0.0.1"
+          port = 8443
+          EOF
+
+          ./target/debug/nexus-link unregister --force
+          if [ ! -f ~/.nexus-link/config.toml ]; then
+            echo "PASS: Config file removed after unregister"
+          else
+            echo "FAIL: Config file still exists"
             exit 1
           fi
 
