@@ -33,7 +33,7 @@ pub async fn execute_command(
 }
 
 async fn handle_compose_restart(
-    state: &Arc<crate::state::AppState>,
+    _state: &Arc<crate::state::AppState>,
     payload: nexus_link_core::types::ComposeRestartPayload,
 ) -> anyhow::Result<CommandResponse> {
     // TODO: Execute docker compose restart via bollard or shell
@@ -48,7 +48,7 @@ async fn handle_compose_restart(
 }
 
 async fn handle_compose_logs(
-    state: &Arc<crate::state::AppState>,
+    _state: &Arc<crate::state::AppState>,
     payload: nexus_link_core::types::ComposeLogsPayload,
 ) -> anyhow::Result<CommandResponse> {
     // TODO: Fetch container logs via bollard
@@ -65,7 +65,7 @@ async fn handle_compose_logs(
 }
 
 async fn handle_config_exchange(
-    state: &Arc<crate::state::AppState>,
+    _state: &Arc<crate::state::AppState>,
     payload: nexus_link_core::types::ConfigExchangePayload,
 ) -> anyhow::Result<CommandResponse> {
     // TODO: Implement config read/write
