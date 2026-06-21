@@ -304,10 +304,10 @@ WorkingDirectory={home}
     let service_path = systemd_unit_path(SERVICE_SERVICE_NAME, mode);
 
     // Ensure directory exists for user units
-    if mode == SystemdMode::User {
-        if let Some(parent) = agent_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+    if mode == SystemdMode::User
+        && let Some(parent) = agent_path.parent()
+    {
+        std::fs::create_dir_all(parent)?;
     }
 
     write_unit_file(&agent_path, &agent_unit, mode)?;

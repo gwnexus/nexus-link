@@ -97,34 +97,34 @@ fn restart_agent() {
         .args(["--user", "restart", "nexus-link-agent"])
         .output();
 
-    if let Ok(o) = user_restart {
-        if o.status.success() {
-            println!("  Agent restarted (user service)");
-            return;
-        }
+    if let Ok(o) = user_restart
+        && o.status.success()
+    {
+        println!("  Agent restarted (user service)");
+        return;
     }
 
     let system_restart = std::process::Command::new("systemctl")
         .args(["restart", "nexus-link-agent"])
         .output();
 
-    if let Ok(o) = system_restart {
-        if o.status.success() {
-            println!("  Agent restarted (system service)");
-            return;
-        }
+    if let Ok(o) = system_restart
+        && o.status.success()
+    {
+        println!("  Agent restarted (system service)");
+        return;
     }
 
     // Try sudo
     let sudo_restart = std::process::Command::new("sudo")
-        .args(["systemctl", "restart", "nexus-link-agent"])
+        .args(["-n", "systemctl", "restart", "nexus-link-agent"])
         .output();
 
-    if let Ok(o) = sudo_restart {
-        if o.status.success() {
-            println!("  Agent restarted (sudo)");
-            return;
-        }
+    if let Ok(o) = sudo_restart
+        && o.status.success()
+    {
+        println!("  Agent restarted (sudo)");
+        return;
     }
 
     println!("  Agent not running as a service. Restart manually if needed.");
