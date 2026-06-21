@@ -1,0 +1,119 @@
+{
+  "env": {
+    "NODE_ENV": "development",
+    "RUSTFLAGS": "-C link-arg=-fuse-ld=mold",
+    "RUSTC_WRAPPER": "sccache",
+    "RUST_BACKTRACE": "1",
+    "C_DBX_META_TEAM": "NEXUS-Labs",
+    "DOCKER_BUILDKIT": "1",
+    "CARGO_TERM_COLOR": "always",
+    "CARGO_INCREMENTAL": "0",
+    "C_DBX_META_TEAM_ID": "NEXUS-Labs-DD",
+    "C_DBX_META_PROJECT_ID": "NEXUS-Homebrew-Link",
+    "NEXT_TELEMETRY_DISABLED": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "C_DBX_META_TEAM_DESCRIPTION": "Nexus SaaS Develpment Team",
+    "POWERLEVEL9K_INSTANT_PROMPT": "quiet"
+  },
+  "shell": {
+    "scripts": {
+      "tm-list": [
+        "task-master list || npx -y task-master-ai list"
+      ],
+      "tm-next": [
+        "task-master next || npx -y task-master-ai next"
+      ],
+      "tmux-2w": [
+        "bash scripts/devbox/dbx_tmux_2w.sh"
+      ],
+      "tmux-3w": [
+        "bash scripts/devbox/dbx_tmux_3w.sh"
+      ],
+      "sec-scan": [
+        "bash scripts/devbox/ops/sec-scan.sh"
+      ],
+      "validate": [
+        "bash scripts/devbox/ops/validate.sh"
+      ],
+      "rust-audit": [
+        "cargo audit || true",
+        "cargo deny check || true"
+      ],
+      "rust-check": [
+        "cargo fmt --all",
+        "cargo clippy --all -- -D warnings",
+        "cargo nextest run --all"
+      ],
+      "webapp-dev": [
+        "pnpm dev"
+      ],
+      "check-local": [
+        "bash scripts/devbox/ops/check-local.sh"
+      ],
+      "webapp-lint": [
+        "pnpm lint && pnpm type-check"
+      ],
+      "webapp-build": [
+        "pnpm build"
+      ]
+    },
+    "init_hook": [
+      "scripts/devbox/dbx_init.sh"
+    ]
+  },
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.17.1/.schema/devbox.schema.json",
+  "packages": {
+    "fd": "latest",
+    "gh": "2.52.0",
+    "go": "1.22.5",
+    "jq": "latest",
+    "sd": "latest",
+    "bat": "0.24.0",
+    "fzf": "0.54.0",
+    "git": "latest",
+    "k9s": "0.40.10",
+    "curl": "latest",
+    "glow": "1.5.1",
+    "just": "latest",
+    "llvm": "latest",
+    "mold": "latest",
+    "pnpm": "latest",
+    "ruff": "latest",
+    "sops": "3.9.0",
+    "tmux": "3.4",
+    "clang": "latest",
+    "cmake": "latest",
+    "grcov": "latest",
+    "tmuxp": "1.47.0",
+    "cosign": "3.0.5",
+    "nodejs": "latest",
+    "poetry": "latest",
+    "python": "3.13.3",
+    "rustup": "latest",
+    "sqlite": "latest",
+    "ansible": "2.18.7",
+    "gofumpt": "0.6.0",
+    "kubectl": "latest",
+    "lazygit": "0.43.1",
+    "nushell": "latest",
+    "openssl": "latest",
+    "ripgrep": "14.1.0",
+    "sccache": "latest",
+    "gitleaks": "latest",
+    "protobuf": "latest",
+    "coreutils": "latest",
+    "git-cliff": "latest",
+    "nodejs_22": "latest",
+    "terraform": "latest",
+    "cargo-deny": "latest",
+    "commitizen": "3.29.1",
+    "pkg-config": "latest",
+    "pre-commit": "3.7.1",
+    "typescript": "latest",
+    "cargo-audit": "latest",
+    "cargo-nextest": "latest",
+    "golangci-lint": "1.59.1",
+    "rust-analyzer": "latest",
+    "docker-compose": "latest"
+  }
+}

@@ -1,0 +1,67 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/nexus-link-core",
+    "crates/nexus-link-cli",
+    "crates/nexus-link-agent",
+    "crates/nexus-link-service",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+authors = ["RELICFROG Consulting <dev@relicfrog.rocks>"]
+repository = "https://github.com/gwnexus/nexus-link"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP
+reqwest = { version = "0.12", features = ["json", "native-tls"] }
+axum = { version = "0.8", features = ["macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors", "auth"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Docker
+bollard = "0.18"
+
+# System info
+sysinfo = "0.33"
+
+# Logging & tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Crypto (token hashing)
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.9"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Internal crates
+nexus-link-core = { path = "crates/nexus-link-core" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+codegen-units = 1

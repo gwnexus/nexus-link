@@ -1,0 +1,69 @@
+# Multi-stage build for nexus-link-service
+# Target: aarch64-unknown-linux-gnu (DGX Spark ARM64)
+
+# --- Builder stage ---
+FROM rust:1.87-bookworm AS builder
+
+# Install cross-compilation toolchain for aarch64
+RUN apt-get update && apt-get install -y \
+    gcc-aarch64-linux-gnu \
+    libc6-dev-arm64-cross \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set cross-compilation environment
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+ENV PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu
+
+# Add the aarch64 target
+RUN rustup target add aarch64-unknown-linux-gnu
+
+WORKDIR /build
+
+# Cache dependencies
+COPY Cargo.toml Cargo.lock ./
+COPY crates/nexus-link-core/Cargo.toml crates/nexus-link-core/
+COPY crates/nexus-link-cli/Cargo.toml crates/nexus-link-cli/
+COPY crates/nexus-link-agent/Cargo.toml crates/nexus-link-agent/
+COPY crates/nexus-link-service/Cargo.toml crates/nexus-link-service/
+
+# Create dummy sources for dependency caching
+RUN mkdir -p crates/nexus-link-core/src && echo "pub fn placeholder() {}" > crates/nexus-link-core/src/lib.rs
+RUN mkdir -p crates/nexus-link-cli/src && echo "fn main() {}" > crates/nexus-link-cli/src/main.rs
+RUN mkdir -p crates/nexus-link-agent/src && echo "fn main() {}" > crates/nexus-link-agent/src/main.rs
+RUN mkdir -p crates/nexus-link-service/src && echo "fn main() {}" > crates/nexus-link-service/src/main.rs
+
+# Build dependencies only (cached)
+RUN cargo build --release --target aarch64-unknown-linux-gnu -p nexus-link-service 2>/dev/null || true
+
+# Copy real source code
+COPY crates/ crates/
+
+# Touch source files to invalidate cache
+RUN find crates -name "*.rs" -exec touch {} \;
+
+# Build the actual binary
+RUN cargo build --release --target aarch64-unknown-linux-gnu -p nexus-link-service
+
+# --- Runtime stage ---
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN useradd -r -s /bin/false nexus-link
+
+COPY --from=builder /build/target/aarch64-unknown-linux-gnu/release/nexus-link-service /usr/local/bin/
+
+USER nexus-link
+
+EXPOSE 8443
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8443/api/health || exit 1
+
+ENTRYPOINT ["nexus-link-service"]

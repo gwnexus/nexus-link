@@ -1,0 +1,58 @@
+# Native aarch64 build (for building directly on Spark or ARM CI)
+# No cross-compilation needed -- builds natively on ARM64
+
+FROM rust:1.87-bookworm AS builder
+
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Cache dependencies
+COPY Cargo.toml Cargo.lock ./
+COPY crates/nexus-link-core/Cargo.toml crates/nexus-link-core/
+COPY crates/nexus-link-cli/Cargo.toml crates/nexus-link-cli/
+COPY crates/nexus-link-agent/Cargo.toml crates/nexus-link-agent/
+COPY crates/nexus-link-service/Cargo.toml crates/nexus-link-service/
+
+# Create dummy sources for dependency caching
+RUN mkdir -p crates/nexus-link-core/src && echo "pub fn placeholder() {}" > crates/nexus-link-core/src/lib.rs
+RUN mkdir -p crates/nexus-link-cli/src && echo "fn main() {}" > crates/nexus-link-cli/src/main.rs
+RUN mkdir -p crates/nexus-link-agent/src && echo "fn main() {}" > crates/nexus-link-agent/src/main.rs
+RUN mkdir -p crates/nexus-link-service/src && echo "fn main() {}" > crates/nexus-link-service/src/main.rs
+
+# Build dependencies only
+RUN cargo build --release -p nexus-link-service 2>/dev/null || true
+
+# Copy real source
+COPY crates/ crates/
+RUN find crates -name "*.rs" -exec touch {} \;
+
+# Build all binaries (service + agent + cli)
+RUN cargo build --release
+
+# --- Runtime stage ---
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -r -s /bin/false nexus-link
+
+COPY --from=builder /build/target/release/nexus-link-service /usr/local/bin/
+COPY --from=builder /build/target/release/nexus-link-agent /usr/local/bin/
+COPY --from=builder /build/target/release/nexus-link /usr/local/bin/
+
+USER nexus-link
+
+EXPOSE 8443
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8443/api/health || exit 1
+
+ENTRYPOINT ["nexus-link-service"]

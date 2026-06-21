@@ -1,0 +1,22 @@
+[package]
+name = "nexus-link-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "CLI binary for nexus-link hardware registration and management"
+
+[[bin]]
+name = "nexus-link"
+path = "src/main.rs"
+
+[dependencies]
+nexus-link-core = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }

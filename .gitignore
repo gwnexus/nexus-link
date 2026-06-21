@@ -1,0 +1,44 @@
+# Rust
+target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Nexus local environment
+.env.nexus.local
+
+# Build artifacts
+dist/
+*.tar.gz
+
+# Docker
+docker-compose.override.yml
+
+# Profiling
+flamegraph.svg
+perf.data*
+
+# Coverage
+*.profraw
+coverage/
+
+# Devbox local state
+.devbox/
+
+# OpenCode local state
+.opencode/sessions/
+
+# Nexus platform logs (local only)
+.nexus/*.log
