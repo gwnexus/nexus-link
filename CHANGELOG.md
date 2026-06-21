@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-06-21
+
+### Added
+- `nexus-link upgrade` command: checks GitHub Releases for newer versions,
+  downloads the matching platform binary, verifies integrity, and replaces
+  the current binary in-place (supports `--force` for re-download)
+- Dedicated test crate (`tests/`) with 44 unit tests covering token, config,
+  types, telemetry serialization, error handling, and preflight checks
+- Integration test workflow (`.github/workflows/integration.yml`) with
+  scenario-based testing: CLI help, preflight, register validation, service health
+- GitHub issue templates (bug report, feature request, security)
+- Pull request template with device testing checklist
+- CODE_OF_CONDUCT.md (Contributor Covenant 2.1)
+- Pre-commit hook (`hooks/pre-commit`) for fmt + clippy
+- `.cargo/config.toml` for macOS linker compatibility
+
+### Fixed
+- Release pipeline: switched from `native-tls` (openssl-sys) to `rustls-tls`
+  to eliminate cross-compilation dependency on system OpenSSL headers
+- Docker images: use `rust:latest` base instead of pinned 1.87
+  (ensures edition 2024 support)
+- Docker runtime: removed unnecessary `libssl3` from runtime images
+  (rustls is statically linked)
+
+### Changed
+- 44 tests passing
+- Version aligned with nexus-cli v0.7.x
+
 ## [0.7.0] - 2026-06-21
 
 ### Added

@@ -1,0 +1,15 @@
+[package]
+name = "nexus-link-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Integration and unit tests for nexus-link"
+publish = false
+
+[dependencies]
+nexus-link-core = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+tempfile = "3"

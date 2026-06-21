@@ -2,14 +2,13 @@
 # Target: aarch64-unknown-linux-gnu (DGX Spark ARM64)
 
 # --- Builder stage ---
-FROM rust:1.87-bookworm AS builder
+FROM rust:latest AS builder
 
 # Install cross-compilation toolchain for aarch64
 RUN apt-get update && apt-get install -y \
     gcc-aarch64-linux-gnu \
     libc6-dev-arm64-cross \
     pkg-config \
-    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set cross-compilation environment
@@ -51,7 +50,6 @@ FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
-    libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user

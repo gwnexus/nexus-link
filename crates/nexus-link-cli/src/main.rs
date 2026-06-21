@@ -53,6 +53,13 @@ enum Commands {
     /// Show current node status
     Status,
 
+    /// Upgrade nexus-link to the latest release
+    Upgrade {
+        /// Force re-download even if already on latest version
+        #[arg(long)]
+        force: bool,
+    },
+
     /// Agent daemon management
     Agent {
         #[command(subcommand)]
@@ -102,6 +109,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Status => commands::status::execute().await,
+        Commands::Upgrade { force } => commands::upgrade::execute(force).await,
         Commands::Agent { action } => match action {
             AgentAction::Start => commands::agent::start().await,
             AgentAction::Stop => commands::agent::stop().await,

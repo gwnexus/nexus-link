@@ -5,10 +5,11 @@ members = [
     "crates/nexus-link-cli",
     "crates/nexus-link-agent",
     "crates/nexus-link-service",
+    "tests",
 ]
 
 [workspace.package]
-version = "0.7.0"
+version = "0.7.1"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["RELICFROG Consulting <dev@relicfrog.rocks>"]
@@ -19,7 +20,7 @@ repository = "https://github.com/gwnexus/nexus-link"
 tokio = { version = "1", features = ["full"] }
 
 # HTTP
-reqwest = { version = "0.12", features = ["json", "native-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 axum = { version = "0.8", features = ["macros"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "cors", "auth"] }

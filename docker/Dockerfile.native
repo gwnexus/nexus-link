@@ -1,11 +1,10 @@
 # Native aarch64 build (for building directly on Spark or ARM CI)
 # No cross-compilation needed -- builds natively on ARM64
 
-FROM rust:1.87-bookworm AS builder
+FROM rust:latest AS builder
 
 RUN apt-get update && apt-get install -y \
     pkg-config \
-    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -38,7 +37,6 @@ FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
-    libssl3 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
