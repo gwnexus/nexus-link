@@ -50,14 +50,17 @@ detect_platform() {
   esac
 
   case "${OS}-${ARCH}" in
-    linux-aarch64) TARGET="aarch64-unknown-linux-gnu"  ;;
-    linux-x86_64)  TARGET="x86_64-unknown-linux-gnu"   ;;
+    linux-aarch64) TARGET="aarch64-unknown-linux-gnu"
+                   ASSET_SLUG="aarch64-linux" ;;
+    linux-x86_64)  TARGET="x86_64-unknown-linux-gnu"
+                   ASSET_SLUG="x86_64-linux" ;;
     darwin-*)      TARGET="${ARCH}-apple-darwin"
+                   ASSET_SLUG="${ARCH}-darwin"
                    warn "nexus-link is designed for Linux nodes. macOS install is for development only." ;;
     *)             die "No target triple for ${OS}-${ARCH}" ;;
   esac
 
-  info "Platform: ${OS}/${ARCH} -> ${TARGET}"
+  info "Platform: ${OS}/${ARCH} -> ${ASSET_SLUG}"
 }
 
 # -- resolve install dir --
@@ -126,8 +129,8 @@ try_binary_download() {
   release_json="$(cat /tmp/nexus_link_release.json)"
   rm -f /tmp/nexus_link_release.json
 
-  # Expected asset: nexus-link-<target>.tar.gz
-  local asset_name="nexus-link-${TARGET}.tar.gz"
+  # Expected asset: nexus-link-<slug>.tar.gz (e.g. nexus-link-aarch64-linux.tar.gz)
+  local asset_name="nexus-link-${ASSET_SLUG}.tar.gz"
   local asset_id
   asset_id="$(echo "$release_json" \
     | python3 -c "
@@ -188,7 +191,7 @@ for a in data.get('assets', []):
   # Install all binaries from the archive
   for bin in nexus-link nexus-link-agent nexus-link-service; do
     local found=""
-    for candidate in "${tmp_dir}/${bin}" "${tmp_dir}/nexus-link-${TARGET}/${bin}" "${tmp_dir}/dist/${bin}"; do
+    for candidate in "${tmp_dir}/${bin}" "${tmp_dir}/nexus-link-${ASSET_SLUG}/${bin}" "${tmp_dir}/dist/${bin}"; do
       if [ -f "$candidate" ]; then
         found="$candidate"
         break
