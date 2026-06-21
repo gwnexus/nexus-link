@@ -63,31 +63,31 @@ compatibility before linking with the Nexus backend.
 
 ### Preflight Checks
 
-| Check        | What it verifies                                |
-| ------------ | ----------------------------------------------- |
-| Architecture | Linux aarch64 or x86_64                         |
-| GPU          | NVIDIA GPU present (via `nvidia-smi`)           |
-| Docker       | Docker daemon accessible                        |
-| Network      | Nexus API reachable                             |
-| Disk         | >= 10 GB available                              |
-| Device Match | Known device in compatibility registry          |
+| Check        | What it verifies                       |
+|--------------|----------------------------------------|
+| Architecture | Linux aarch64 or x86_64                |
+| GPU          | NVIDIA GPU present (via `nvidia-smi`)  |
+| Docker       | Docker daemon accessible               |
+| Network      | Nexus API reachable                    |
+| Disk         | >= 10 GB available                     |
+| Device Match | Known device in compatibility registry |
 
 ### Compatibility Verdicts
 
-| Verdict            | Meaning                                                         |
-| ------------------ | --------------------------------------------------------------- |
-| **COMPATIBLE**     | Device is in the tested registry. Registration proceeds.        |
-| **NOT RECOMMENDED**| GPU detected but device is not a known/tested model. Use `--force`. |
-| **INCOMPATIBLE**   | No GPU detected. Registration blocked.                          |
+| Verdict             | Meaning                                                             |
+|---------------------|---------------------------------------------------------------------|
+| **COMPATIBLE**      | Device is in the tested registry. Registration proceeds.            |
+| **NOT RECOMMENDED** | GPU detected but device is not a known/tested model. Use `--force`. |
+| **INCOMPATIBLE**    | No GPU detected. Registration blocked.                              |
 
 ### Known Devices (fully tested)
 
-| Device                    | Identifier | Notes                                     |
-| ------------------------- | ---------- | ----------------------------------------- |
-| NVIDIA DGX Spark          | `gb10`     | GB10 Grace Blackwell, 128 GB, aarch64     |
-| NVIDIA DGX Station A100   | `a100`     | 4x A100 80GB, AMD EPYC, x86_64           |
-| NVIDIA DGX A100           | `dgx-a100` | 8x A100 80GB, AMD EPYC, x86_64           |
-| NVIDIA DGX H100           | `dgx-h100` | 8x H100 80GB, x86_64                     |
+| Device                  | Identifier | Notes                                 |
+|-------------------------|------------|---------------------------------------|
+| NVIDIA DGX Spark        | `gb10`     | GB10 Grace Blackwell, 128 GB, aarch64 |
+| NVIDIA DGX Station A100 | `a100`     | 4x A100 80GB, AMD EPYC, x86_64        |
+| NVIDIA DGX A100         | `dgx-a100` | 8x A100 80GB, AMD EPYC, x86_64        |
+| NVIDIA DGX H100         | `dgx-h100` | 8x H100 80GB, x86_64                  |
 
 ### Register Flags
 
@@ -102,15 +102,15 @@ nexus-link register --token <token> --skip-preflight # Skip all checks
 A **hybrid data channel** decouples telemetry push from command inbound:
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  On-Premise Node (e.g. DGX Spark)                               │
-│                                                                   │
+┌──────────────────────────────────────────────────────────────────┐
+│  On-Premise Node (e.g. DGX Spark)                                │
+│                                                                  │
 │  nexus-link-agent ──────────────► Nexus API                      │
 │  (telemetry push, 30s interval)    POST /api/nodes/:id/telemetry │
-│                                                                   │
+│                                                                  │
 │  nexus-link-service ◄──────────── Nexus App                      │
 │  (axum HTTPS :8443)               signed command payloads        │
-└─────────────────────────────────────────────────────────────────┘
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 - **Telemetry Push** -- the agent streams GPU/CPU/memory metrics and Docker
@@ -131,11 +131,11 @@ nexus-link agent logs [-t 50]               Show agent logs
 
 ### Supported Commands (via Service)
 
-| Command           | Description                              |
-| ----------------- | ---------------------------------------- |
-| `compose_restart` | Restart a Docker Compose service         |
-| `compose_logs`    | Fetch recent logs from a service         |
-| `config_exchange` | Exchange configuration with the backend  |
+| Command           | Description                             |
+|-------------------|-----------------------------------------|
+| `compose_restart` | Restart a Docker Compose service        |
+| `compose_logs`    | Fetch recent logs from a service        |
+| `config_exchange` | Exchange configuration with the backend |
 
 ## Project Structure
 
