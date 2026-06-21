@@ -50,6 +50,13 @@ enum Commands {
     /// Run device preflight check without registering
     Preflight,
 
+    /// Refresh the node token (token rotation)
+    Refresh {
+        /// New node token from the Nexus dashboard
+        #[arg(long)]
+        token: String,
+    },
+
     /// Show current node status
     Status,
 
@@ -115,6 +122,7 @@ async fn main() -> anyhow::Result<()> {
                 _ => Ok(()),
             }
         }
+        Commands::Refresh { token } => commands::refresh::execute(token).await,
         Commands::Status => commands::status::execute().await,
         Commands::Unregister { force } => commands::unregister::execute(force).await,
         Commands::Upgrade { force } => commands::upgrade::execute(force).await,

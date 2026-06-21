@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] - 2026-06-21
+
+### Added
+- `nexus-link refresh --token <nxs_node_*>`: token rotation with rollback safety.
+  Validates new token, sends heartbeat to verify acceptance, reverts to old token
+  on failure. Restarts agent after successful rotation.
+- Non-root systemd support: `nexus-link agent start` detects whether the user
+  is root (or has sudo) and chooses between system-wide units
+  (`/etc/systemd/system/`) and per-user units (`~/.config/systemd/user/`).
+  Warns about `loginctl enable-linger` for user services.
+- Sudo capability check: `sudo -n true` probe before attempting privileged ops.
+
+### Changed
+- Installer writes to `~/.local/bin` by default (no root required on target nodes)
+- Agent `start/stop/logs` commands respect systemd user mode for non-root users
+- `which_binary` now prioritizes `~/.local/bin` over `/usr/local/bin`
+- 49 tests passing
+
 ## [0.7.2] - 2026-06-21
 
 ### Added
