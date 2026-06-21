@@ -218,16 +218,16 @@ fn version_newer(latest: &str, current: &str) -> bool {
     l > c
 }
 
-/// Detect the current platform target triple
+/// Detect the current platform asset slug (matches release artifact names)
 fn detect_target() -> anyhow::Result<&'static str> {
     let arch = std::env::consts::ARCH;
     let os = std::env::consts::OS;
 
     match (os, arch) {
-        ("linux", "aarch64") => Ok("aarch64-unknown-linux-gnu"),
-        ("linux", "x86_64") => Ok("x86_64-unknown-linux-gnu"),
-        ("macos", "aarch64") => Ok("aarch64-apple-darwin"),
-        ("macos", "x86_64") => Ok("x86_64-apple-darwin"),
+        ("linux", "aarch64") => Ok("aarch64-linux"),
+        ("linux", "x86_64") => Ok("x86_64-linux"),
+        ("macos", "aarch64") => Ok("aarch64-darwin"),
+        ("macos", "x86_64") => Ok("x86_64-darwin"),
         _ => anyhow::bail!("Unsupported platform: {}/{}", os, arch),
     }
 }
@@ -254,10 +254,11 @@ mod tests {
 
     #[test]
     fn test_detect_target() {
-        // Should not panic on the current platform
         let result = detect_target();
         assert!(result.is_ok());
         let target = result.unwrap();
-        assert!(target.contains("linux") || target.contains("darwin") || target.contains("apple"));
+        assert!(target.contains("linux") || target.contains("darwin"));
+        // Should be short slug, not full triple
+        assert!(!target.contains("unknown"));
     }
 }
