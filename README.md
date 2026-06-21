@@ -33,7 +33,7 @@ Requires Rust >= 1.85 (2024 edition).
 ### Pin a version
 
 ```bash
-NEXUS_LINK_VERSION=v0.1.0 curl -fsSL https://nexus.gatewarden.eu/install-link.sh | bash
+NEXUS_LINK_VERSION=v0.7.0 curl -fsSL https://nexus.gatewarden.eu/install-link.sh | bash
 ```
 
 ## Quick Start
