@@ -15,19 +15,23 @@ COPY crates/nexus-link-core/Cargo.toml crates/nexus-link-core/
 COPY crates/nexus-link-cli/Cargo.toml crates/nexus-link-cli/
 COPY crates/nexus-link-agent/Cargo.toml crates/nexus-link-agent/
 COPY crates/nexus-link-service/Cargo.toml crates/nexus-link-service/
+COPY tests/Cargo.toml tests/
 
 # Create dummy sources for dependency caching
 RUN mkdir -p crates/nexus-link-core/src && echo "pub fn placeholder() {}" > crates/nexus-link-core/src/lib.rs
 RUN mkdir -p crates/nexus-link-cli/src && echo "fn main() {}" > crates/nexus-link-cli/src/main.rs
 RUN mkdir -p crates/nexus-link-agent/src && echo "fn main() {}" > crates/nexus-link-agent/src/main.rs
 RUN mkdir -p crates/nexus-link-service/src && echo "fn main() {}" > crates/nexus-link-service/src/main.rs
+RUN mkdir -p tests/src && echo "" > tests/src/lib.rs
 
 # Build dependencies only
 RUN cargo build --release -p nexus-link-service 2>/dev/null || true
 
 # Copy real source
 COPY crates/ crates/
+COPY tests/ tests/
 RUN find crates -name "*.rs" -exec touch {} \;
+RUN find tests -name "*.rs" -exec touch {} \;
 
 # Build all binaries (service + agent + cli)
 RUN cargo build --release
