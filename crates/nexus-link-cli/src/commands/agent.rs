@@ -12,7 +12,7 @@ pub async fn start() -> anyhow::Result<()> {
     // Check if systemd unit files exist, generate if not
     if !systemd_unit_exists(AGENT_SERVICE_NAME) {
         println!("Generating systemd unit files...");
-        generate_systemd_units(&config)?;
+        generate_systemd_units()?;
         reload_systemd()?;
     }
 
@@ -117,7 +117,7 @@ fn systemd_unit_path(service_name: &str) -> PathBuf {
 }
 
 /// Generate systemd unit files for agent and service
-fn generate_systemd_units(config: &Config) -> anyhow::Result<()> {
+fn generate_systemd_units() -> anyhow::Result<()> {
     let nexus_link_bin = which_binary("nexus-link-agent")?;
     let nexus_link_service_bin = which_binary("nexus-link-service")?;
     let config_path = config::default_config_path();
