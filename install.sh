@@ -251,6 +251,39 @@ build_from_source() {
   ok "Built and installed from source"
 }
 
+# -- create symlinks in /usr/local/bin if not already there --
+create_symlinks() {
+  # Skip if already installed in a system path
+  if [ "$BIN_DIR" = "/usr/local/bin" ] || [ "$BIN_DIR" = "/usr/bin" ]; then
+    return 0
+  fi
+
+  # Only attempt if we can write to /usr/local/bin (root or sudo)
+  local target_dir="/usr/local/bin"
+
+  for bin in nexus-link nexus-link-agent nexus-link-service; do
+    local src="${BIN_DIR}/${bin}"
+    local dst="${target_dir}/${bin}"
+
+    if [ ! -f "$src" ]; then
+      continue
+    fi
+
+    if [ -f "$dst" ] || [ -L "$dst" ]; then
+      continue  # already exists
+    fi
+
+    # Try direct symlink
+    if ln -sf "$src" "$dst" 2>/dev/null; then
+      ok "Symlinked ${bin} -> ${dst}"
+    elif command -v sudo &>/dev/null; then
+      if sudo ln -sf "$src" "$dst" 2>/dev/null; then
+        ok "Symlinked ${bin} -> ${dst} (sudo)"
+      fi
+    fi
+  done
+}
+
 # -- verify --
 verify_install() {
   if command -v "$BINARY_NAME" &>/dev/null; then
@@ -285,6 +318,7 @@ main() {
     build_from_source
   fi
 
+  create_symlinks
   verify_install
 
   echo ""

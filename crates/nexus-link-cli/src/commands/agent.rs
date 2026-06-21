@@ -207,22 +207,40 @@ fn generate_systemd_units(mode: SystemdMode) -> anyhow::Result<()> {
         .display()
         .to_string();
 
-    let (install_target, extra_hardening) = match mode {
-        SystemdMode::System => (
-            "WantedBy=multi-user.target",
-            "\
+    // For system units running as non-root user, we need User= and HOME=
+    let current_user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
+    let current_home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+
+    let (user_directive, install_target, extra_hardening) = match mode {
+        SystemdMode::System => {
+            let user_line = if current_user != "root" {
+                format!(
+                    "User={}\nGroup={}\nEnvironment=HOME={}",
+                    current_user, current_user, current_home
+                )
+            } else {
+                String::new()
+            };
+            (
+                user_line,
+                "WantedBy=multi-user.target".to_string(),
+                format!(
+                    "\
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
 ReadOnlyPaths=/
-ReadWritePaths={home}
-PrivateTmp=true"
-                .replace("{home}", &working_dir),
-        ),
+ReadWritePaths={}
+PrivateTmp=true",
+                    working_dir
+                ),
+            )
+        }
         SystemdMode::User => (
-            "WantedBy=default.target".into(),
-            String::new(), // user units have different security defaults
+            String::new(),
+            "WantedBy=default.target".to_string(),
+            String::new(),
         ),
     };
 
@@ -241,6 +259,7 @@ Restart=always
 RestartSec=10
 Environment=RUST_LOG=nexus_link_agent=info
 WorkingDirectory={home}
+{user}
 {extra}
 
 [Install]
@@ -248,6 +267,7 @@ WorkingDirectory={home}
 "#,
         bin = nexus_link_bin.display(),
         home = working_dir,
+        user = user_directive,
         extra = extra_hardening,
         install = install_target,
     );
@@ -267,6 +287,7 @@ Restart=always
 RestartSec=10
 Environment=RUST_LOG=nexus_link_service=info
 WorkingDirectory={home}
+{user}
 {extra}
 
 [Install]
@@ -274,6 +295,7 @@ WorkingDirectory={home}
 "#,
         bin = nexus_link_service_bin.display(),
         home = working_dir,
+        user = user_directive,
         extra = extra_hardening,
         install = install_target,
     );

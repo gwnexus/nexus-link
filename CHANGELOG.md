@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4] - 2026-06-21
+
+### Added
+- `nexus-link config show|set|get|path` commands for runtime configuration
+  management (api_url, push_interval, listen_addr, port, name, tags)
+- Installer creates symlinks in `/usr/local/bin` for system-wide access
+  (attempts direct write, falls back to sudo)
+
+### Fixed
+- **Critical:** systemd system units now include `User=` and `Environment=HOME=`
+  directives when installed by a non-root user. Previously, the agent ran as root
+  and looked for config in `/root/.nexus-link/` instead of the registering user's
+  home directory.
+- Binary search now prioritizes `~/.local/bin` (where the installer writes)
+
+### Changed
+- 49 tests passing
+
 ## [0.7.3] - 2026-06-21
 
 ### Added

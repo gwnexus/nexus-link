@@ -74,11 +74,37 @@ enum Commands {
         force: bool,
     },
 
+    /// Configuration management
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+
     /// Agent daemon management
     Agent {
         #[command(subcommand)]
         action: AgentAction,
     },
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Display current configuration
+    Show,
+    /// Set a configuration value (e.g. nexus-link config set api_url https://...)
+    Set {
+        /// Config key (api_url, push_interval, listen_addr, port, name, tags)
+        key: String,
+        /// New value
+        value: String,
+    },
+    /// Get a configuration value
+    Get {
+        /// Config key
+        key: String,
+    },
+    /// Show the config file path
+    Path,
 }
 
 #[derive(Subcommand)]
@@ -126,6 +152,12 @@ async fn main() -> anyhow::Result<()> {
         Commands::Status => commands::status::execute().await,
         Commands::Unregister { force } => commands::unregister::execute(force).await,
         Commands::Upgrade { force } => commands::upgrade::execute(force).await,
+        Commands::Config { action } => match action {
+            ConfigAction::Show => commands::config::show().await,
+            ConfigAction::Set { key, value } => commands::config::set(key, value).await,
+            ConfigAction::Get { key } => commands::config::get(key).await,
+            ConfigAction::Path => commands::config::path().await,
+        },
         Commands::Agent { action } => match action {
             AgentAction::Start => commands::agent::start().await,
             AgentAction::Stop => commands::agent::stop().await,
