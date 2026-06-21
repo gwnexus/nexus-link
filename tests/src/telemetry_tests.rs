@@ -38,12 +38,14 @@ fn test_telemetry_payload_serialization() {
                 power_draw_watts: 150.0,
             }],
         }),
+        private_ip: Some("10.0.0.50".to_string()),
     };
 
     let json = serde_json::to_string(&payload).unwrap();
     assert!(json.contains("test-node"));
     assert!(json.contains("vllm-coder-main"));
     assert!(json.contains("GB10 Grace Blackwell"));
+    assert!(json.contains("10.0.0.50"));
 }
 
 #[test]
@@ -61,6 +63,7 @@ fn test_telemetry_payload_without_gpu() {
         },
         containers: vec![],
         gpu: None,
+        private_ip: None,
     };
 
     let json = serde_json::to_string(&payload).unwrap();

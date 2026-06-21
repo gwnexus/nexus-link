@@ -14,10 +14,12 @@ pub async fn collect_telemetry(config: &Config) -> anyhow::Result<TelemetryPaylo
     let system_metrics = collect_system_metrics();
     let container_metrics = collect_container_metrics().await?;
     let gpu_metrics = collect_gpu_metrics().await;
+    let private_ip = detect_private_ip();
 
     debug!(
         containers = container_metrics.len(),
         gpu = gpu_metrics.is_some(),
+        ip = ?private_ip,
         "Telemetry collected"
     );
 
@@ -27,6 +29,7 @@ pub async fn collect_telemetry(config: &Config) -> anyhow::Result<TelemetryPaylo
         system: system_metrics,
         containers: container_metrics,
         gpu: gpu_metrics,
+        private_ip,
     })
 }
 
@@ -198,13 +201,76 @@ async fn collect_gpu_metrics() -> Option<GpuMetrics> {
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let devices = parse_nvidia_smi_output(&stdout);
+    let mut devices = parse_nvidia_smi_output(&stdout);
+
+    // For unified memory GPUs (like DGX Spark GB10), memory.total/used report [N/A].
+    // Fall back to aggregating per-process GPU memory usage.
+    for device in &mut devices {
+        if device.memory_total_bytes == 0 && device.memory_used_bytes == 0 {
+            let (used, total) = query_unified_gpu_memory().await;
+            device.memory_used_bytes = used;
+            device.memory_total_bytes = total;
+        }
+    }
 
     if devices.is_empty() {
         None
     } else {
         Some(GpuMetrics { devices })
     }
+}
+
+/// For unified memory systems (DGX Spark), query GPU memory from process list
+/// Returns (used_bytes, total_bytes)
+async fn query_unified_gpu_memory() -> (u64, u64) {
+    // Get per-process GPU memory usage
+    let used = query_process_gpu_memory().await;
+
+    // Total = system memory (unified architecture shares RAM with GPU)
+    let total = get_system_memory_total();
+
+    (used, total)
+}
+
+/// Sum GPU memory used by all compute processes
+async fn query_process_gpu_memory() -> u64 {
+    let output = tokio::process::Command::new("nvidia-smi")
+        .args([
+            "--query-compute-apps=used_gpu_memory",
+            "--format=csv,noheader,nounits",
+        ])
+        .output()
+        .await;
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            let total_mib: u64 = stdout
+                .lines()
+                .filter_map(|line| line.trim().parse::<u64>().ok())
+                .sum();
+            total_mib * 1024 * 1024
+        }
+        _ => 0,
+    }
+}
+
+/// Read total system memory from /proc/meminfo
+fn get_system_memory_total() -> u64 {
+    if let Ok(content) = std::fs::read_to_string("/proc/meminfo") {
+        for line in content.lines() {
+            if line.starts_with("MemTotal:") {
+                let kb: u64 = line
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                return kb * 1024;
+            }
+        }
+    }
+    // Fallback: 128 GB for DGX Spark
+    128 * 1024 * 1024 * 1024
 }
 
 /// Parse nvidia-smi CSV output into GpuDevice structs
@@ -248,6 +314,44 @@ pub fn parse_nvidia_smi_output(output: &str) -> Vec<GpuDevice> {
     }
 
     devices
+}
+
+/// Detect the primary private IP address of this machine
+fn detect_private_ip() -> Option<String> {
+    // Strategy: parse `ip route get 1.1.1.1` to find the source IP
+    // This gives us the IP that would be used for outbound traffic
+    let output = std::process::Command::new("ip")
+        .args(["route", "get", "1.1.1.1"])
+        .output();
+
+    if let Ok(o) = output {
+        if o.status.success() {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            // Output looks like: "1.1.1.1 via 10.0.0.1 dev eth0 src 10.0.0.50 uid 1000"
+            if let Some(src_idx) = stdout.find("src ") {
+                let after_src = &stdout[src_idx + 4..];
+                let ip = after_src.split_whitespace().next().unwrap_or("");
+                if !ip.is_empty() {
+                    return Some(ip.to_string());
+                }
+            }
+        }
+    }
+
+    // Fallback: parse `hostname -I` (first IP)
+    let output = std::process::Command::new("hostname").arg("-I").output();
+
+    if let Ok(o) = output {
+        if o.status.success() {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            let first_ip = stdout.split_whitespace().next().unwrap_or("");
+            if !first_ip.is_empty() {
+                return Some(first_ip.to_string());
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]

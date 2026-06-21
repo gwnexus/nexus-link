@@ -11,6 +11,9 @@ pub struct TelemetryPayload {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gpu: Option<GpuMetrics>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub private_ip: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
