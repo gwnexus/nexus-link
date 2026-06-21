@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-06-21
+
+### Added
+- GPU telemetry collection: parses nvidia-smi CSV output for temperature,
+  utilization, memory usage, and power draw per device
+- Per-container stats: CPU percentage, memory usage/limit, network RX/TX
+  via bollard stats API (one-shot, non-streaming)
+- Systemd integration: `nexus-link agent start` generates security-hardened
+  unit files, enables and starts both agent and service via systemctl
+- `nexus-link agent stop`: systemctl stop with pkill fallback
+- `nexus-link agent logs`: journalctl output with unit filter
+- `nexus-link unregister [--force]`: device-side cleanup (offline heartbeat,
+  agent stop, config removal)
+- Integration test scenario for unregister command
+
+### Changed
+- 49 tests passing (5 new GPU parser tests, 1 new integration scenario)
+- Container metrics no longer return zeros -- real stats from Docker API
+
 ## [0.7.1] - 2026-06-21
 
 ### Added
