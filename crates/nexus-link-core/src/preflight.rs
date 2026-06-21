@@ -312,34 +312,31 @@ fn detect_known_device() -> Option<KnownDevice> {
         .arg("--query-gpu=name")
         .arg("--format=csv,noheader")
         .output()
+        && output.status.success()
     {
-        if output.status.success() {
-            let gpu_name = String::from_utf8_lossy(&output.stdout).to_lowercase();
-            // DGX Spark uses GB10 Grace Blackwell
-            if gpu_name.contains("blackwell")
-                || gpu_name.contains("gb10")
-                || gpu_name.contains("gb202")
-            {
-                return Some(KnownDevice {
-                    name: "NVIDIA DGX Spark".to_string(),
-                    identifier: "gb10".to_string(),
-                    notes: "GB10 Grace Blackwell, 128 GB unified memory, aarch64".to_string(),
-                });
-            }
-            if gpu_name.contains("a100") {
-                return Some(KnownDevice {
-                    name: "NVIDIA DGX Station A100".to_string(),
-                    identifier: "a100".to_string(),
-                    notes: "A100 GPU detected".to_string(),
-                });
-            }
-            if gpu_name.contains("h100") {
-                return Some(KnownDevice {
-                    name: "NVIDIA DGX H100".to_string(),
-                    identifier: "dgx-h100".to_string(),
-                    notes: "H100 GPU detected".to_string(),
-                });
-            }
+        let gpu_name = String::from_utf8_lossy(&output.stdout).to_lowercase();
+        // DGX Spark uses GB10 Grace Blackwell
+        if gpu_name.contains("blackwell") || gpu_name.contains("gb10") || gpu_name.contains("gb202")
+        {
+            return Some(KnownDevice {
+                name: "NVIDIA DGX Spark".to_string(),
+                identifier: "gb10".to_string(),
+                notes: "GB10 Grace Blackwell, 128 GB unified memory, aarch64".to_string(),
+            });
+        }
+        if gpu_name.contains("a100") {
+            return Some(KnownDevice {
+                name: "NVIDIA DGX Station A100".to_string(),
+                identifier: "a100".to_string(),
+                notes: "A100 GPU detected".to_string(),
+            });
+        }
+        if gpu_name.contains("h100") {
+            return Some(KnownDevice {
+                name: "NVIDIA DGX H100".to_string(),
+                identifier: "dgx-h100".to_string(),
+                notes: "H100 GPU detected".to_string(),
+            });
         }
     }
 
