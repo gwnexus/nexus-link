@@ -3,7 +3,6 @@ use serde::Deserialize;
 use tracing::info;
 
 const REPO: &str = "gwnexus/nexus-link";
-const BINARY_NAME: &str = "nexus-link";
 const GITHUB_API: &str = "https://api.github.com";
 
 #[derive(Debug, Deserialize)]
@@ -18,7 +17,8 @@ struct GithubAsset {
     browser_download_url: String,
 }
 
-/// Check for a newer version on GitHub Releases
+/// Check for a newer version on GitHub Releases (used for background update notifications)
+#[allow(dead_code)]
 pub async fn check_update() -> anyhow::Result<Option<String>> {
     let current = env!("CARGO_PKG_VERSION");
     let client = reqwest::Client::builder()
