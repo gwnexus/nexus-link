@@ -1,9 +1,13 @@
 use bollard::Docker;
+use bollard::container::StatsOptions;
 use chrono::Utc;
+use futures::StreamExt;
 use nexus_link_core::config::Config;
-use nexus_link_core::telemetry::{ContainerMetrics, GpuMetrics, SystemMetrics, TelemetryPayload};
+use nexus_link_core::telemetry::{
+    ContainerMetrics, GpuDevice, GpuMetrics, SystemMetrics, TelemetryPayload,
+};
 use sysinfo::{Disks, System};
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// Collect telemetry from the local system and Docker daemon
 pub async fn collect_telemetry(config: &Config) -> anyhow::Result<TelemetryPayload> {
@@ -48,7 +52,13 @@ fn collect_system_metrics() -> SystemMetrics {
 }
 
 async fn collect_container_metrics() -> anyhow::Result<Vec<ContainerMetrics>> {
-    let docker = Docker::connect_with_local_defaults()?;
+    let docker = match Docker::connect_with_local_defaults() {
+        Ok(d) => d,
+        Err(e) => {
+            debug!("Docker not available: {}", e);
+            return Ok(vec![]);
+        }
+    };
 
     let containers = docker
         .list_containers(Some(bollard::container::ListContainersOptions::<String> {
@@ -61,34 +71,243 @@ async fn collect_container_metrics() -> anyhow::Result<Vec<ContainerMetrics>> {
 
     for container in containers {
         let id = container.id.unwrap_or_default();
+        let short_id: String = id.chars().take(12).collect();
         let name = container
             .names
             .and_then(|n| n.first().cloned())
-            .unwrap_or_else(|| id.chars().take(12).collect())
+            .unwrap_or_else(|| short_id.clone())
             .trim_start_matches('/')
             .to_string();
 
-        // TODO: Collect per-container CPU/memory stats via stats API
-        // For now, provide basic info
+        // Collect per-container stats (one-shot, non-streaming)
+        let stats = get_container_stats(&docker, &id).await;
+
         metrics.push(ContainerMetrics {
-            id: id.chars().take(12).collect(),
+            id: short_id,
             name,
             image: container.image.unwrap_or_default(),
             status: container.status.unwrap_or_default(),
-            cpu_percent: 0.0,      // TODO: from stats stream
-            memory_usage_bytes: 0, // TODO: from stats stream
-            memory_limit_bytes: 0, // TODO: from stats stream
-            network_rx_bytes: 0,   // TODO: from stats stream
-            network_tx_bytes: 0,   // TODO: from stats stream
+            cpu_percent: stats.cpu_percent,
+            memory_usage_bytes: stats.memory_usage,
+            memory_limit_bytes: stats.memory_limit,
+            network_rx_bytes: stats.network_rx,
+            network_tx_bytes: stats.network_tx,
         });
     }
 
     Ok(metrics)
 }
 
+struct ContainerStats {
+    cpu_percent: f64,
+    memory_usage: u64,
+    memory_limit: u64,
+    network_rx: u64,
+    network_tx: u64,
+}
+
+/// Get a single stats snapshot from a container (non-streaming)
+async fn get_container_stats(docker: &Docker, container_id: &str) -> ContainerStats {
+    let default = ContainerStats {
+        cpu_percent: 0.0,
+        memory_usage: 0,
+        memory_limit: 0,
+        network_rx: 0,
+        network_tx: 0,
+    };
+
+    let mut stream = docker.stats(
+        container_id,
+        Some(StatsOptions {
+            stream: false, // one-shot
+            one_shot: true,
+        }),
+    );
+
+    let stats = match stream.next().await {
+        Some(Ok(s)) => s,
+        Some(Err(e)) => {
+            debug!("Stats error for {}: {}", &container_id[..12], e);
+            return default;
+        }
+        None => return default,
+    };
+
+    // Calculate CPU percentage
+    let cpu_percent = calculate_cpu_percent(&stats);
+
+    // Memory
+    let memory_usage = stats.memory_stats.usage.unwrap_or(0);
+    let memory_limit = stats.memory_stats.limit.unwrap_or(0);
+
+    // Network (sum all interfaces)
+    let (network_rx, network_tx) = stats
+        .networks
+        .map(|nets| {
+            nets.values().fold((0u64, 0u64), |(rx, tx), net| {
+                (rx + net.rx_bytes, tx + net.tx_bytes)
+            })
+        })
+        .unwrap_or((0, 0));
+
+    ContainerStats {
+        cpu_percent,
+        memory_usage,
+        memory_limit,
+        network_rx,
+        network_tx,
+    }
+}
+
+/// Calculate CPU usage percentage from Docker stats
+fn calculate_cpu_percent(stats: &bollard::container::Stats) -> f64 {
+    let cpu_delta = stats.cpu_stats.cpu_usage.total_usage as f64
+        - stats.precpu_stats.cpu_usage.total_usage as f64;
+
+    let system_delta = stats.cpu_stats.system_cpu_usage.unwrap_or(0) as f64
+        - stats.precpu_stats.system_cpu_usage.unwrap_or(0) as f64;
+
+    if system_delta > 0.0 && cpu_delta > 0.0 {
+        let num_cpus = stats.cpu_stats.online_cpus.unwrap_or(1) as f64;
+        (cpu_delta / system_delta) * num_cpus * 100.0
+    } else {
+        0.0
+    }
+}
+
+/// Collect GPU metrics by parsing nvidia-smi output
 async fn collect_gpu_metrics() -> Option<GpuMetrics> {
-    // TODO: Parse nvidia-smi output for GPU metrics on DGX Spark
-    // nvidia-smi --query-gpu=index,name,temperature.gpu,utilization.gpu,memory.total,memory.used,power.draw
-    //   --format=csv,noheader,nounits
-    None
+    let output = tokio::process::Command::new("nvidia-smi")
+        .args([
+            "--query-gpu=index,name,temperature.gpu,utilization.gpu,memory.total,memory.used,power.draw",
+            "--format=csv,noheader,nounits",
+        ])
+        .output()
+        .await;
+
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        Ok(_) => {
+            debug!("nvidia-smi returned non-zero exit code");
+            return None;
+        }
+        Err(e) => {
+            debug!("nvidia-smi not available: {}", e);
+            return None;
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let devices = parse_nvidia_smi_output(&stdout);
+
+    if devices.is_empty() {
+        None
+    } else {
+        Some(GpuMetrics { devices })
+    }
+}
+
+/// Parse nvidia-smi CSV output into GpuDevice structs
+///
+/// Expected format (one line per GPU):
+/// index, name, temperature.gpu, utilization.gpu, memory.total, memory.used, power.draw
+/// 0, NVIDIA GB10 Grace Blackwell, 52, 85, 131072, 98304, 150.00
+pub fn parse_nvidia_smi_output(output: &str) -> Vec<GpuDevice> {
+    let mut devices = Vec::new();
+
+    for line in output.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let fields: Vec<&str> = line.split(',').map(|f| f.trim()).collect();
+        if fields.len() < 7 {
+            warn!("nvidia-smi: unexpected line format: {}", line);
+            continue;
+        }
+
+        let index = fields[0].parse::<u32>().unwrap_or(0);
+        let name = fields[1].to_string();
+        let temperature = fields[2].parse::<f64>().unwrap_or(0.0);
+        let utilization = fields[3].parse::<f64>().unwrap_or(0.0);
+        // nvidia-smi reports memory in MiB, convert to bytes
+        let memory_total_mib = fields[4].parse::<u64>().unwrap_or(0);
+        let memory_used_mib = fields[5].parse::<u64>().unwrap_or(0);
+        let power_draw = fields[6].parse::<f64>().unwrap_or(0.0);
+
+        devices.push(GpuDevice {
+            index,
+            name,
+            temperature_celsius: temperature,
+            utilization_percent: utilization,
+            memory_total_bytes: memory_total_mib * 1024 * 1024,
+            memory_used_bytes: memory_used_mib * 1024 * 1024,
+            power_draw_watts: power_draw,
+        });
+    }
+
+    devices
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_nvidia_smi_single_gpu() {
+        let output = "0, NVIDIA GB10 Grace Blackwell, 52, 85, 131072, 98304, 150.00\n";
+        let devices = parse_nvidia_smi_output(output);
+
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].index, 0);
+        assert_eq!(devices[0].name, "NVIDIA GB10 Grace Blackwell");
+        assert_eq!(devices[0].temperature_celsius, 52.0);
+        assert_eq!(devices[0].utilization_percent, 85.0);
+        assert_eq!(devices[0].memory_total_bytes, 131072 * 1024 * 1024);
+        assert_eq!(devices[0].memory_used_bytes, 98304 * 1024 * 1024);
+        assert_eq!(devices[0].power_draw_watts, 150.0);
+    }
+
+    #[test]
+    fn test_parse_nvidia_smi_multi_gpu() {
+        let output = "\
+0, NVIDIA A100 80GB, 45, 92, 81920, 65536, 280.50
+1, NVIDIA A100 80GB, 47, 88, 81920, 72000, 275.00
+2, NVIDIA A100 80GB, 44, 95, 81920, 78000, 290.00
+3, NVIDIA A100 80GB, 46, 90, 81920, 70000, 285.00
+";
+        let devices = parse_nvidia_smi_output(output);
+
+        assert_eq!(devices.len(), 4);
+        assert_eq!(devices[0].name, "NVIDIA A100 80GB");
+        assert_eq!(devices[3].index, 3);
+        assert_eq!(devices[1].temperature_celsius, 47.0);
+    }
+
+    #[test]
+    fn test_parse_nvidia_smi_empty_output() {
+        let devices = parse_nvidia_smi_output("");
+        assert!(devices.is_empty());
+    }
+
+    #[test]
+    fn test_parse_nvidia_smi_malformed_line() {
+        let output = "this is not valid csv\n0, GPU, 50, 80, 16384, 8192, 100.00\n";
+        let devices = parse_nvidia_smi_output(output);
+        // First line skipped (not enough fields), second line parsed
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].name, "GPU");
+    }
+
+    #[test]
+    fn test_parse_nvidia_smi_dgx_spark_realistic() {
+        // DGX Spark has a single integrated GPU with 128GB unified memory
+        let output = "0, NVIDIA GB202, 48, 72, 131072, 94208, 125.50\n";
+        let devices = parse_nvidia_smi_output(output);
+
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].memory_total_bytes, 128 * 1024 * 1024 * 1024); // 128 GB
+        assert_eq!(devices[0].power_draw_watts, 125.5);
+    }
 }
