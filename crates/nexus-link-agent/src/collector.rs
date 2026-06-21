@@ -324,16 +324,16 @@ fn detect_private_ip() -> Option<String> {
         .args(["route", "get", "1.1.1.1"])
         .output();
 
-    if let Ok(o) = output {
-        if o.status.success() {
-            let stdout = String::from_utf8_lossy(&o.stdout);
-            // Output looks like: "1.1.1.1 via 10.0.0.1 dev eth0 src 10.0.0.50 uid 1000"
-            if let Some(src_idx) = stdout.find("src ") {
-                let after_src = &stdout[src_idx + 4..];
-                let ip = after_src.split_whitespace().next().unwrap_or("");
-                if !ip.is_empty() {
-                    return Some(ip.to_string());
-                }
+    if let Ok(o) = output
+        && o.status.success()
+    {
+        let stdout = String::from_utf8_lossy(&o.stdout);
+        // Output looks like: "1.1.1.1 via 10.0.0.1 dev eth0 src 10.0.0.50 uid 1000"
+        if let Some(src_idx) = stdout.find("src ") {
+            let after_src = &stdout[src_idx + 4..];
+            let ip = after_src.split_whitespace().next().unwrap_or("");
+            if !ip.is_empty() {
+                return Some(ip.to_string());
             }
         }
     }
@@ -341,13 +341,13 @@ fn detect_private_ip() -> Option<String> {
     // Fallback: parse `hostname -I` (first IP)
     let output = std::process::Command::new("hostname").arg("-I").output();
 
-    if let Ok(o) = output {
-        if o.status.success() {
-            let stdout = String::from_utf8_lossy(&o.stdout);
-            let first_ip = stdout.split_whitespace().next().unwrap_or("");
-            if !first_ip.is_empty() {
-                return Some(first_ip.to_string());
-            }
+    if let Ok(o) = output
+        && o.status.success()
+    {
+        let stdout = String::from_utf8_lossy(&o.stdout);
+        let first_ip = stdout.split_whitespace().next().unwrap_or("");
+        if !first_ip.is_empty() {
+            return Some(first_ip.to_string());
         }
     }
 
