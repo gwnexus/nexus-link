@@ -18,9 +18,9 @@ jobs:
       matrix:
         include:
           - target: aarch64-unknown-linux-gnu
-            artifact: nexus-link-aarch64-linux
+            artifact: nexus-link-aarch64-unknown-linux-gnu
           - target: x86_64-unknown-linux-gnu
-            artifact: nexus-link-x86_64-linux
+            artifact: nexus-link-x86_64-unknown-linux-gnu
 
     steps:
       - uses: actions/checkout@v4
@@ -105,6 +105,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            nexus-link-aarch64-linux/nexus-link-aarch64-linux.tar.gz
-            nexus-link-x86_64-linux/nexus-link-x86_64-linux.tar.gz
+            nexus-link-aarch64-unknown-linux-gnu/nexus-link-aarch64-unknown-linux-gnu.tar.gz
+            nexus-link-x86_64-unknown-linux-gnu/nexus-link-x86_64-unknown-linux-gnu.tar.gz
           generate_release_notes: true
