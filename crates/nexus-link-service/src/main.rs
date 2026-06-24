@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::Router;
+use axum::{Router, middleware as axum_mw};
 use nexus_link_core::config::Config;
 use tokio::signal;
 use tower_http::trace::TraceLayer;
@@ -30,10 +30,24 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::load()?;
     let addr = SocketAddr::new(config.service.listen_addr.parse()?, config.service.port);
 
+    info!(
+        compose_root = %config.compose.dir.display(),
+        "Compose root configured"
+    );
+
     let state = Arc::new(AppState::new(config)?);
 
+    // Protected routes have the auth middleware applied with access to SharedState.
+    // from_fn_with_state is called here (after state is constructed) so the closure
+    // can extract State<SharedState> via axum's standard extractor mechanism.
+    let protected = handlers::protected_routes()
+        .layer(axum_mw::from_fn_with_state(
+            Arc::clone(&state),
+            middleware::auth::require_auth,
+        ));
+
     let app = Router::new()
-        .nest("/api", handlers::api_routes())
+        .nest("/api", handlers::public_routes().merge(protected))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

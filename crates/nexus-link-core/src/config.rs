@@ -21,6 +21,32 @@ pub struct Config {
 
     #[serde(default)]
     pub service: ServiceConfig,
+
+    #[serde(default)]
+    pub compose: ComposeConfig,
+}
+
+/// Configuration for Docker Compose management
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComposeConfig {
+    /// Directory containing docker-compose.yaml and related config files
+    /// Default: /opt/dgx-llm
+    #[serde(default = "default_compose_dir")]
+    pub dir: PathBuf,
+
+    /// Extra file extensions to expose alongside the compose file
+    /// Default: [".env", ".conf", ".toml"]
+    #[serde(default = "default_compose_extra_extensions")]
+    pub extra_extensions: Vec<String>,
+}
+
+impl Default for ComposeConfig {
+    fn default() -> Self {
+        Self {
+            dir: default_compose_dir(),
+            extra_extensions: default_compose_extra_extensions(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,4 +135,12 @@ fn default_listen_addr() -> String {
 
 fn default_listen_port() -> u16 {
     8443
+}
+
+fn default_compose_dir() -> PathBuf {
+    PathBuf::from("/opt/dgx-llm")
+}
+
+fn default_compose_extra_extensions() -> Vec<String> {
+    vec![".env".into(), ".conf".into(), ".toml".into()]
 }

@@ -1,4 +1,4 @@
-use nexus_link_core::config::{ApiConfig, Config, NodeConfig, ServiceConfig};
+use nexus_link_core::config::{ApiConfig, ComposeConfig, Config, NodeConfig, ServiceConfig};
 use tempfile::TempDir;
 
 #[test]
@@ -18,6 +18,7 @@ fn test_config_save_and_load() {
             push_interval_secs: 30,
         },
         service: ServiceConfig::default(),
+        compose: ComposeConfig::default(),
     };
 
     config.save_to(config_path.clone()).unwrap();
@@ -36,6 +37,13 @@ fn test_config_default_service() {
     let svc = ServiceConfig::default();
     assert_eq!(svc.listen_addr, "0.0.0.0");
     assert_eq!(svc.port, 8443);
+}
+
+#[test]
+fn test_config_default_compose() {
+    let compose = ComposeConfig::default();
+    assert_eq!(compose.dir.to_str().unwrap(), "/opt/dgx-llm");
+    assert!(compose.extra_extensions.contains(&".env".to_string()));
 }
 
 #[test]
@@ -61,6 +69,7 @@ fn test_config_save_creates_directory() {
             push_interval_secs: 60,
         },
         service: ServiceConfig::default(),
+        compose: ComposeConfig::default(),
     };
 
     config.save_to(nested_path.clone()).unwrap();
@@ -87,6 +96,7 @@ fn test_config_roundtrip_with_custom_service() {
             listen_addr: "127.0.0.1".to_string(),
             port: 9443,
         },
+        compose: ComposeConfig::default(),
     };
 
     config.save_to(config_path.clone()).unwrap();
@@ -95,4 +105,34 @@ fn test_config_roundtrip_with_custom_service() {
     assert_eq!(loaded.service.listen_addr, "127.0.0.1");
     assert_eq!(loaded.service.port, 9443);
     assert_eq!(loaded.api.push_interval_secs, 15);
+}
+
+#[test]
+fn test_config_roundtrip_with_custom_compose_dir() {
+    let tmp = TempDir::new().unwrap();
+    let config_path = tmp.path().join("config.toml");
+
+    let config = Config {
+        node: NodeConfig {
+            node_id: "node-2".to_string(),
+            name: "spark2".to_string(),
+            token: "nxs_node_y".to_string(),
+            tags: vec![],
+        },
+        api: ApiConfig {
+            base_url: "https://api.example.com".to_string(),
+            push_interval_secs: 10,
+        },
+        service: ServiceConfig::default(),
+        compose: ComposeConfig {
+            dir: std::path::PathBuf::from("/srv/llm-stack"),
+            extra_extensions: vec![".env".into()],
+        },
+    };
+
+    config.save_to(config_path.clone()).unwrap();
+    let loaded = Config::load_from(config_path).unwrap();
+
+    assert_eq!(loaded.compose.dir.to_str().unwrap(), "/srv/llm-stack");
+    assert_eq!(loaded.compose.extra_extensions, vec![".env"]);
 }

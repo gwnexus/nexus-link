@@ -34,6 +34,13 @@ pub async fn show() -> anyhow::Result<()> {
     println!("  [service]");
     println!("  listen_addr      = {}", config.service.listen_addr);
     println!("  port             = {}", config.service.port);
+    println!();
+    println!("  [compose]");
+    println!("  dir              = {}", config.compose.dir.display());
+    println!(
+        "  extra_extensions = {}",
+        config.compose.extra_extensions.join(", ")
+    );
 
     Ok(())
 }
@@ -75,10 +82,14 @@ pub async fn set(key: String, value: String) -> anyhow::Result<()> {
             config.node.tags = value.split(',').map(|s| s.trim().to_string()).collect();
             println!("  node.tags = {:?}", config.node.tags);
         }
+        "compose.dir" | "compose_dir" => {
+            config.compose.dir = std::path::PathBuf::from(&value);
+            println!("  compose.dir = {}", value);
+        }
         _ => {
             anyhow::bail!(
                 "Unknown config key: '{}'\n\nAvailable keys:\n  \
-                 api_url, push_interval, listen_addr, port, name, tags",
+                 api_url, push_interval, listen_addr, port, name, tags, compose_dir",
                 key
             );
         }
@@ -104,10 +115,11 @@ pub async fn get(key: String) -> anyhow::Result<()> {
         "node.node_id" | "node_id" => config.node.node_id,
         "node.tags" | "tags" => config.node.tags.join(","),
         "node.token" | "token" => config.node.token,
+        "compose.dir" | "compose_dir" => config.compose.dir.to_string_lossy().to_string(),
         _ => {
             anyhow::bail!(
                 "Unknown config key: '{}'\n\nAvailable keys:\n  \
-                 api_url, push_interval, listen_addr, port, name, node_id, tags, token",
+                 api_url, push_interval, listen_addr, port, name, node_id, tags, token, compose_dir",
                 key
             );
         }

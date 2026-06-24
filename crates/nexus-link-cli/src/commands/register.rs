@@ -93,6 +93,7 @@ pub async fn execute(
             push_interval_secs: 10,
         },
         service: ServiceConfig::default(),
+        compose: nexus_link_core::config::ComposeConfig::default(),
     };
 
     config.save()?;

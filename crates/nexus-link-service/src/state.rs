@@ -5,9 +5,7 @@ use nexus_link_core::config::Config;
 
 /// Shared application state for the axum service
 pub struct AppState {
-    #[allow(dead_code)]
     pub config: Config,
-    #[allow(dead_code)]
     pub docker: Docker,
 }
 

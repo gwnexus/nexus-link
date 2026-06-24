@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Command types that can be sent from Nexus backend to the node
@@ -60,6 +61,67 @@ pub struct RegisterRequest {
 pub struct RegisterResponse {
     pub node_id: String,
     pub token: String,
+}
+
+// ---------------------------------------------------------------------------
+// Compose file management types
+// ---------------------------------------------------------------------------
+
+/// Metadata entry for a single file in the compose root
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComposeFileEntry {
+    pub filename: String,
+    pub size_bytes: u64,
+    pub modified_at: DateTime<Utc>,
+}
+
+/// Response for GET /api/compose/files
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComposeFileListResponse {
+    pub compose_root: String,
+    pub files: Vec<ComposeFileEntry>,
+}
+
+/// Response for GET /api/compose/files/:filename
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComposeFileContent {
+    pub filename: String,
+    pub content: String,
+    pub size_bytes: u64,
+    pub modified_at: DateTime<Utc>,
+}
+
+/// Request body for PUT /api/compose/files/:filename
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComposeFileWriteRequest {
+    pub content: String,
+    /// Optional human-readable commit message (logged server-side)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// Response for PUT /api/compose/files/:filename
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComposeFileWriteResponse {
+    pub success: bool,
+    pub filename: String,
+    pub size_bytes: u64,
+}
+
+/// Response for POST /api/compose/apply
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComposeApplyResponse {
+    pub success: bool,
+    pub exit_code: i32,
+    pub output: String,
+}
+
+/// Response for GET /api/compose/logs[/:service]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComposeLogsResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    pub lines: Vec<String>,
 }
 
 fn default_tail_lines() -> u32 {
