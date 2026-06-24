@@ -26,18 +26,37 @@ pub struct Config {
     pub compose: ComposeConfig,
 }
 
-/// Configuration for Docker Compose management
+/// Configuration for Docker Compose management and C&C channel
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposeConfig {
-    /// Directory containing docker-compose.yaml and related config files
+    /// Directory containing docker-compose.yaml and related config files.
     /// Default: /opt/dgx-llm
     #[serde(default = "default_compose_dir")]
     pub dir: PathBuf,
 
-    /// Extra file extensions to expose alongside the compose file
+    /// Extra file extensions to expose alongside the compose file.
     /// Default: [".env", ".conf", ".toml"]
     #[serde(default = "default_compose_extra_extensions")]
     pub extra_extensions: Vec<String>,
+
+    /// C&C channel token (nxs_cmd_*).
+    /// Required for all /api/compose/* routes. If absent the endpoint
+    /// returns 403 Forbidden.
+    #[serde(default)]
+    pub cmd_token: Option<String>,
+
+    /// Ed25519 public key used to verify signed commands from the Nexus backend.
+    /// Base64url-encoded 32-byte verifying key. Also written to
+    /// ~/.nexus-link/signing_key.pub at registration time.
+    /// If absent, signature verification is skipped (warning logged).
+    #[serde(default)]
+    pub signing_public_key: Option<String>,
+
+    /// When true, write operations (PUT /api/compose/file, POST
+    /// /api/compose/activate) require a valid X-Nexus-Signature header.
+    /// Default: false (v1 — set to true once backend signing is deployed).
+    #[serde(default)]
+    pub require_signatures: bool,
 }
 
 impl Default for ComposeConfig {
@@ -45,6 +64,9 @@ impl Default for ComposeConfig {
         Self {
             dir: default_compose_dir(),
             extra_extensions: default_compose_extra_extensions(),
+            cmd_token: None,
+            signing_public_key: None,
+            require_signatures: false,
         }
     }
 }

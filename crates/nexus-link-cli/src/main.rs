@@ -26,9 +26,14 @@ enum Commands {
         #[arg(long, default_value = "https://nexus.gatewarden.eu")]
         api_url: String,
 
-        /// Node registration token
+        /// Node registration token (nxs_node_*)
         #[arg(long)]
         token: String,
+
+        /// C&C command token (nxs_cmd_*) for compose management.
+        /// Generated in the Nexus dashboard alongside the node token.
+        #[arg(long)]
+        cmd_token: Option<String>,
 
         /// Human-readable name for this node
         #[arg(long)]
@@ -133,11 +138,12 @@ async fn main() -> anyhow::Result<()> {
         Commands::Register {
             api_url,
             token,
+            cmd_token,
             name,
             tags,
             skip_preflight,
             force,
-        } => commands::register::execute(api_url, token, name, tags, skip_preflight, force).await,
+        } => commands::register::execute(api_url, token, cmd_token, name, tags, skip_preflight, force).await,
         Commands::Preflight => {
             let report = nexus_link_core::preflight::run_preflight();
             nexus_link_core::preflight::print_report(&report);

@@ -41,6 +41,21 @@ pub async fn show() -> anyhow::Result<()> {
         "  extra_extensions = {}",
         config.compose.extra_extensions.join(", ")
     );
+    match &config.compose.cmd_token {
+        Some(t) => println!(
+            "  cmd_token        = {}...",
+            &t[..20.min(t.len())]
+        ),
+        None => println!("  cmd_token        = (not configured — C&C channel disabled)"),
+    }
+    match &config.compose.signing_public_key {
+        Some(k) => println!("  signing_key      = {}...", &k[..20.min(k.len())]),
+        None => println!("  signing_key      = (not configured — signatures disabled)"),
+    }
+    println!(
+        "  require_signatures = {}",
+        config.compose.require_signatures
+    );
 
     Ok(())
 }
@@ -86,10 +101,25 @@ pub async fn set(key: String, value: String) -> anyhow::Result<()> {
             config.compose.dir = std::path::PathBuf::from(&value);
             println!("  compose.dir = {}", value);
         }
+        "compose.cmd_token" | "cmd_token" => {
+            if !value.is_empty() && !nexus_link_core::token::validate_cmd_token_format(&value) {
+                anyhow::bail!("Invalid cmd_token format. Expected: nxs_cmd_<...>");
+            }
+            config.compose.cmd_token = if value.is_empty() { None } else { Some(value.clone()) };
+            println!("  compose.cmd_token = {}...", &value[..20.min(value.len())]);
+        }
+        "compose.require_signatures" | "require_signatures" => {
+            let v: bool = value
+                .parse()
+                .map_err(|_| anyhow::anyhow!("Expected true or false"))?;
+            config.compose.require_signatures = v;
+            println!("  compose.require_signatures = {}", v);
+        }
         _ => {
             anyhow::bail!(
                 "Unknown config key: '{}'\n\nAvailable keys:\n  \
-                 api_url, push_interval, listen_addr, port, name, tags, compose_dir",
+                 api_url, push_interval, listen_addr, port, name, tags,\n  \
+                 compose_dir, compose.cmd_token, compose.require_signatures",
                 key
             );
         }
@@ -116,10 +146,17 @@ pub async fn get(key: String) -> anyhow::Result<()> {
         "node.tags" | "tags" => config.node.tags.join(","),
         "node.token" | "token" => config.node.token,
         "compose.dir" | "compose_dir" => config.compose.dir.to_string_lossy().to_string(),
+        "compose.cmd_token" | "cmd_token" => {
+            config.compose.cmd_token.unwrap_or_else(|| "(not configured)".to_string())
+        }
+        "compose.require_signatures" | "require_signatures" => {
+            config.compose.require_signatures.to_string()
+        }
         _ => {
             anyhow::bail!(
                 "Unknown config key: '{}'\n\nAvailable keys:\n  \
-                 api_url, push_interval, listen_addr, port, name, node_id, tags, token, compose_dir",
+                 api_url, push_interval, listen_addr, port, name, node_id, tags, token,\n  \
+                 compose_dir, compose.cmd_token, compose.require_signatures",
                 key
             );
         }

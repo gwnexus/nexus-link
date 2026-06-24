@@ -12,6 +12,8 @@ mod handlers;
 mod middleware;
 mod state;
 
+use middleware::auth::require_auth;
+use middleware::cmd_auth::require_cmd_auth;
 use state::AppState;
 
 #[tokio::main]
@@ -32,22 +34,32 @@ async fn main() -> anyhow::Result<()> {
 
     info!(
         compose_root = %config.compose.dir.display(),
-        "Compose root configured"
+        cmd_channel  = config.compose.cmd_token.is_some(),
+        signatures   = config.compose.require_signatures,
+        "Compose channel configured"
     );
 
     let state = Arc::new(AppState::new(config)?);
 
-    // Protected routes have the auth middleware applied with access to SharedState.
-    // from_fn_with_state is called here (after state is constructed) so the closure
-    // can extract State<SharedState> via axum's standard extractor mechanism.
-    let protected = handlers::protected_routes()
-        .layer(axum_mw::from_fn_with_state(
-            Arc::clone(&state),
-            middleware::auth::require_auth,
-        ));
+    // Command routes — protected by node token (nxs_node_*)
+    let command_routes = handlers::command_routes().layer(axum_mw::from_fn_with_state(
+        Arc::clone(&state),
+        require_auth,
+    ));
+
+    // Compose routes — protected by C&C token (nxs_cmd_*)
+    let compose_routes = handlers::compose_routes().layer(axum_mw::from_fn_with_state(
+        Arc::clone(&state),
+        require_cmd_auth,
+    ));
 
     let app = Router::new()
-        .nest("/api", handlers::public_routes().merge(protected))
+        .nest(
+            "/api",
+            handlers::public_routes()
+                .merge(command_routes)
+                .merge(compose_routes),
+        )
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

@@ -127,6 +127,9 @@ fn test_config_roundtrip_with_custom_compose_dir() {
         compose: ComposeConfig {
             dir: std::path::PathBuf::from("/srv/llm-stack"),
             extra_extensions: vec![".env".into()],
+            cmd_token: Some("nxs_cmd_testtoken".to_string()),
+            signing_public_key: None,
+            require_signatures: false,
         },
     };
 

@@ -9,23 +9,25 @@ use axum::{
 
 use crate::state::SharedState;
 
-/// Build the public (unauthenticated) API routes.
+/// Public routes — no authentication required.
 pub fn public_routes() -> Router<SharedState> {
     Router::new().route("/health", get(health::health_check))
 }
 
-/// Build the protected API routes (auth middleware applied in main.rs).
-pub fn protected_routes() -> Router<SharedState> {
+/// Command routes — protected by node token (nxs_node_*).
+/// Auth middleware applied in main.rs via from_fn_with_state + require_auth.
+pub fn command_routes() -> Router<SharedState> {
+    Router::new().route("/commands", post(commands::execute_command))
+}
+
+/// Compose routes — protected by C&C token (nxs_cmd_*).
+/// Auth middleware applied in main.rs via from_fn_with_state + require_cmd_auth.
+pub fn compose_routes() -> Router<SharedState> {
     Router::new()
-        // Legacy command endpoint
-        .route("/commands", post(commands::execute_command))
-        // Compose file management
         .route(
             "/compose/file",
             get(compose::get_compose_file).put(compose::put_compose_file),
         )
-        // Compose activate (docker compose up -d)
         .route("/compose/activate", post(compose::activate_compose))
-        // Compose log stream (SSE)
         .route("/compose/logs", get(compose::stream_compose_logs))
 }

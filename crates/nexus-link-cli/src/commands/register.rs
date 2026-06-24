@@ -1,4 +1,4 @@
-use nexus_link_core::config::{ApiConfig, Config, NodeConfig, ServiceConfig};
+use nexus_link_core::config::{ApiConfig, ComposeConfig, Config, NodeConfig, ServiceConfig, dirs_home};
 use nexus_link_core::preflight::{self, PreflightVerdict};
 use nexus_link_core::types::RegisterRequest;
 use tracing::info;
@@ -6,6 +6,7 @@ use tracing::info;
 pub async fn execute(
     api_url: String,
     token: String,
+    cmd_token: Option<String>,
     name: Option<String>,
     tags: Vec<String>,
     skip_preflight: bool,
@@ -24,9 +25,7 @@ pub async fn execute(
         preflight::print_report(&report);
 
         match report.verdict {
-            PreflightVerdict::Compatible => {
-                // All good, continue
-            }
+            PreflightVerdict::Compatible => {}
             PreflightVerdict::NotRecommended => {
                 if !force {
                     anyhow::bail!(
@@ -52,9 +51,16 @@ pub async fn execute(
 
     info!("Registering node '{}' with Nexus at {}", node_name, api_url);
 
-    // Validate token format
+    // Validate node token format
     if !nexus_link_core::token::validate_token_format(&token) {
         anyhow::bail!("Invalid token format. Expected: nxs_node_<...>");
+    }
+
+    // Validate cmd_token format if provided
+    if let Some(ref ct) = cmd_token {
+        if !nexus_link_core::token::validate_cmd_token_format(ct) {
+            anyhow::bail!("Invalid cmd-token format. Expected: nxs_cmd_<...>");
+        }
     }
 
     let client = reqwest::Client::new();
@@ -80,6 +86,21 @@ pub async fn execute(
 
     let register_resp: nexus_link_core::types::RegisterResponse = resp.json().await?;
 
+    // Prefer the cmd_token from the backend response; fall back to the CLI flag.
+    let resolved_cmd_token = register_resp.cmd_token.clone().or(cmd_token);
+
+    // Prefer signing_public_key from the backend response.
+    let signing_public_key = register_resp.signing_public_key.clone();
+
+    // Write signing_key.pub to ~/.nexus-link/ if the backend provided one
+    if let Some(ref pubkey_b64) = signing_public_key {
+        let home = dirs_home();
+        std::fs::create_dir_all(&home)?;
+        let key_path = home.join("signing_key.pub");
+        std::fs::write(&key_path, pubkey_b64)?;
+        println!("  Signing key: {}", key_path.display());
+    }
+
     // Save config locally
     let config = Config {
         node: NodeConfig {
@@ -93,7 +114,11 @@ pub async fn execute(
             push_interval_secs: 10,
         },
         service: ServiceConfig::default(),
-        compose: nexus_link_core::config::ComposeConfig::default(),
+        compose: ComposeConfig {
+            cmd_token: resolved_cmd_token,
+            signing_public_key,
+            ..ComposeConfig::default()
+        },
     };
 
     config.save()?;
@@ -105,6 +130,14 @@ pub async fn execute(
         "  Config:  {}",
         nexus_link_core::config::default_config_path().display()
     );
+
+    // Remind the operator if the C&C channel is not yet configured
+    if config.compose.cmd_token.is_none() {
+        println!();
+        println!("  Note: C&C channel not configured (--cmd-token not provided).");
+        println!("  Compose management API will return 403 until a cmd token is set:");
+        println!("    nexus-link config set compose.cmd_token <nxs_cmd_*>");
+    }
 
     Ok(())
 }

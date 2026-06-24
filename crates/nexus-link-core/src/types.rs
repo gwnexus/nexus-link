@@ -59,8 +59,21 @@ pub struct RegisterRequest {
 /// Node registration response from backend
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterResponse {
+    /// Assigned node ID (UUID)
     pub node_id: String,
+    /// Node token (nxs_node_*) — identity / telemetry credential
     pub token: String,
+    /// C&C command token (nxs_cmd_*) — compose management credential.
+    /// Present when the backend supports ADR-0051. May be None for older
+    /// backends; in that case compose routes will return 403 until set
+    /// manually via `nexus-link config set compose.cmd_token <token>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cmd_token: Option<String>,
+    /// Ed25519 public key (base64url, 32 bytes) for verifying signed
+    /// commands from the Nexus backend. Written to ~/.nexus-link/signing_key.pub.
+    /// None on older backends — signature verification stays disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_public_key: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

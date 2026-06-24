@@ -1087,6 +1087,7 @@ dependencies = [
  "anyhow",
  "async-stream",
  "axum",
+ "base64",
  "bollard",
  "futures-util",
  "nexus-link-core",
