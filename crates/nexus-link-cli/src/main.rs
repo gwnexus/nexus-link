@@ -136,6 +136,8 @@ enum AgentAction {
     Start,
     /// Stop the running agent and service
     Stop,
+    /// Restart the agent and service (stop + start)
+    Restart,
     /// Show agent logs
     Logs {
         /// Number of tail lines
@@ -198,6 +200,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Agent { action } => match action {
             AgentAction::Start => commands::agent::start().await,
             AgentAction::Stop => commands::agent::stop().await,
+            AgentAction::Restart => commands::agent::restart().await,
             AgentAction::Logs { tail } => commands::agent::logs(tail).await,
         },
     }

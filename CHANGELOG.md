@@ -5,7 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.4] - 2026-06-25
+## [0.8.5] - 2026-06-25
+
+### Added
+- `nexus-link agent restart` — restarts both `nexus-link-agent` and
+  `nexus-link-service` via `systemctl restart`. Falls back to `start`
+  if the service is not yet registered as a systemd unit.
+  Respects user vs. system systemd mode (same detection logic as
+  `agent start` / `agent stop`).
+
+
 
 ### Changed
 

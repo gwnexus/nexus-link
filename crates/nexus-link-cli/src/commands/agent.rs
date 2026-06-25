@@ -102,9 +102,44 @@ pub async fn start() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn stop() -> anyhow::Result<()> {
-    info!("Stopping nexus-link agent and service...");
+pub async fn restart() -> anyhow::Result<()> {
+    info!("Restarting nexus-link agent and service...");
 
+    let config = Config::load()?;
+    let mode = detect_systemd_mode();
+
+    // Restart both services via systemctl; fall back to stop+start if the
+    // service is not yet registered (restart returns an error on unknown units).
+    let agent_ok = systemctl("restart", AGENT_SERVICE_NAME, mode).is_ok();
+    let service_ok = systemctl("restart", SERVICE_SERVICE_NAME, mode).is_ok();
+
+    if agent_ok {
+        println!(
+            "  Agent:   restarted (telemetry push every {}s)",
+            config.agent.push_sec
+        );
+    } else {
+        println!("  Agent:   not running as a service — attempting start...");
+        systemctl("start", AGENT_SERVICE_NAME, mode).ok();
+    }
+
+    if service_ok {
+        println!(
+            "  Service: restarted (listening on {}:{})",
+            config.service.listen_addr, config.service.port
+        );
+    } else {
+        println!("  Service: not running as a service — attempting start...");
+        systemctl("start", SERVICE_SERVICE_NAME, mode).ok();
+    }
+
+    println!();
+    println!("Done. Use 'nexus-link agent logs' to verify.");
+
+    Ok(())
+}
+
+pub async fn stop() -> anyhow::Result<()> {
     let mode = detect_systemd_mode();
     let mut stopped = false;
 
