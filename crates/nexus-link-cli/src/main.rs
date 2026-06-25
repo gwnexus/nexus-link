@@ -6,7 +6,12 @@ mod commands;
 #[derive(Parser)]
 #[command(
     name = "nexus-link",
-    about = "Nexus hardware node management CLI",
+    about = concat!(
+        "Nexus Link v",
+        env!("CARGO_PKG_VERSION"),
+        " — Nexus platform hardware agent\n",
+        "(C) 2025-present RelicFrog Holding UG | Nexus Product Group"
+    ),
     version
 )]
 struct Cli {
