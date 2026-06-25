@@ -366,31 +366,80 @@ fn find_compose_file(dir: &std::path::Path) -> Option<std::path::PathBuf> {
     None
 }
 
+const EXTENSIONLESS_ALLOWLIST: &[&str] = &["Caddyfile", "Dockerfile", "Makefile"];
+
+/// Read extra config files from the compose directory and one level of subdirectories.
+/// Returns (relative_name, content) tuples.
 fn read_extra_files(dir: &std::path::Path, extensions: &[String]) -> Vec<(String, String)> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
+    let Ok(dir_canonical) = dir.canonicalize() else {
         return vec![];
     };
     let mut files = vec![];
+    collect_poller_files(dir, dir, extensions, &dir_canonical, &mut files);
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    files
+}
+
+fn collect_poller_files(
+    root: &std::path::Path,
+    current: &std::path::Path,
+    extensions: &[String],
+    dir_canonical: &std::path::Path,
+    files: &mut Vec<(String, String)>,
+) {
+    let Ok(entries) = std::fs::read_dir(current) else {
+        return;
+    };
+    let depth = if current == root { 0usize } else { 1 };
+
     for entry in entries.flatten() {
         let path = entry.path();
+
+        if path.is_dir() && depth == 0 {
+            collect_poller_files(root, &path, extensions, dir_canonical, files);
+            continue;
+        }
         if !path.is_file() {
             continue;
         }
-        let name = path
+        if let Ok(canonical) = path.canonicalize()
+            && !canonical.starts_with(dir_canonical)
+        {
+            continue;
+        }
+
+        let file_name = path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_string();
-        if name == "docker-compose.yaml" || name == "docker-compose.yml" {
+
+        if file_name == "docker-compose.yaml" || file_name == "docker-compose.yml" {
             continue;
         }
-        if !extensions.iter().any(|ext| name.ends_with(ext.as_str())) {
+
+        let rel_name = path
+            .strip_prefix(root)
+            .ok()
+            .and_then(|p| p.to_str())
+            .unwrap_or(&file_name)
+            .to_string();
+
+        let has_extension = file_name.contains('.');
+        let matches = if has_extension {
+            extensions
+                .iter()
+                .any(|ext| file_name.ends_with(ext.as_str()))
+        } else {
+            EXTENSIONLESS_ALLOWLIST.contains(&file_name.as_str())
+        };
+
+        if !matches {
             continue;
         }
+
         if let Ok(content) = std::fs::read_to_string(&path) {
-            files.push((name, content));
+            files.push((rel_name, content));
         }
     }
-    files.sort_by(|a, b| a.0.cmp(&b.0));
-    files
 }

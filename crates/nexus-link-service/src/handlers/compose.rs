@@ -92,48 +92,98 @@ fn find_compose_file(dir: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Read extra config files from the compose directory that match the allowed extensions.
+/// Well-known extensionless config files that are always included.
+const EXTENSIONLESS_ALLOWLIST: &[&str] = &["Caddyfile", "Dockerfile", "Makefile"];
+
+/// Read extra config files from the compose directory and one level of subdirectories.
+/// Returns files matching the configured extensions plus known extensionless config files.
+/// Relative paths are used as names (e.g. "config/litellm_config.yaml").
 fn read_extra_files(dir: &Path, extensions: &[String]) -> Vec<ComposeFileEntry> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return vec![];
+    let dir_canonical = match dir.canonicalize() {
+        Ok(c) => c,
+        Err(_) => return vec![],
     };
 
     let mut files = vec![];
+    collect_extra_files(dir, dir, extensions, &dir_canonical, &mut files);
+    files.sort_by(|a, b| a.name.cmp(&b.name));
+    files
+}
+
+fn collect_extra_files(
+    root: &Path,
+    current: &Path,
+    extensions: &[String],
+    dir_canonical: &Path,
+    files: &mut Vec<ComposeFileEntry>,
+) {
+    let Ok(entries) = std::fs::read_dir(current) else {
+        return;
+    };
+
+    let depth = if current == root { 0usize } else { 1 };
+
     for entry in entries.flatten() {
         let path = entry.path();
+
+        // Recurse one level into subdirectories
+        if path.is_dir() && depth == 0 {
+            collect_extra_files(root, &path, extensions, dir_canonical, files);
+            continue;
+        }
+
         if !path.is_file() {
             continue;
         }
-        // SEC-004: Ensure the resolved path stays within the compose directory.
-        // Symlinks that escape the directory are rejected.
+
+        // Security: reject symlinks that escape the compose directory
         if let Ok(canonical) = path.canonicalize()
-            && let Ok(dir_canonical) = dir.canonicalize()
-            && !canonical.starts_with(&dir_canonical)
+            && !canonical.starts_with(dir_canonical)
         {
             continue;
         }
-        let name = path
+
+        let file_name = path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_string();
-        // Skip the compose file itself
-        if name == "docker-compose.yaml" || name == "docker-compose.yml" {
+
+        // Skip compose files themselves
+        if file_name == "docker-compose.yaml" || file_name == "docker-compose.yml" {
             continue;
         }
-        let matches = extensions.iter().any(|ext| {
-            name.ends_with(ext.as_str()) || name.starts_with(ext.trim_start_matches('.'))
-        });
+
+        // Build relative name (e.g. "config/litellm_config.yaml")
+        let rel_name = path
+            .strip_prefix(root)
+            .ok()
+            .and_then(|p| p.to_str())
+            .unwrap_or(&file_name)
+            .to_string();
+
+        // Match: configured extensions OR extensionless allowlist
+        let has_extension = file_name.contains('.');
+        let matches = if has_extension {
+            extensions
+                .iter()
+                .any(|ext| file_name.ends_with(ext.as_str()))
+        } else {
+            EXTENSIONLESS_ALLOWLIST.contains(&file_name.as_str())
+        };
+
         if !matches {
             continue;
         }
+
         match std::fs::read_to_string(&path) {
-            Ok(content) => files.push(ComposeFileEntry { name, content }),
+            Ok(content) => files.push(ComposeFileEntry {
+                name: rel_name,
+                content,
+            }),
             Err(e) => warn!("Could not read extra file {}: {}", path.display(), e),
         }
     }
-    files.sort_by(|a, b| a.name.cmp(&b.name));
-    files
 }
 
 /// Check if a directory is a git repository.
