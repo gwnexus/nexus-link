@@ -55,11 +55,20 @@ enum Commands {
     /// Run device preflight check without registering
     Preflight,
 
-    /// Refresh the node token (token rotation)
+    /// Refresh the node token (node token rotation)
     Refresh {
-        /// New node token from the Nexus dashboard
+        /// New node token (nxs_node_*) from the Nexus dashboard
         #[arg(long)]
         token: String,
+    },
+
+    /// Refresh the C&C command token (cmd token rotation).
+    /// Run this after rotating the token in the Nexus dashboard.
+    /// Takes effect immediately — no service restart required.
+    RefreshCmd {
+        /// New C&C command token (nxs_cmd_*) from the Nexus dashboard
+        #[arg(long)]
+        cmd_token: String,
     },
 
     /// Show current node status
@@ -155,6 +164,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Refresh { token } => commands::refresh::execute(token).await,
+        Commands::RefreshCmd { cmd_token } => commands::refresh_cmd::execute(cmd_token).await,
         Commands::Status => commands::status::execute().await,
         Commands::Unregister { force } => commands::unregister::execute(force).await,
         Commands::Upgrade { force } => commands::upgrade::execute(force).await,

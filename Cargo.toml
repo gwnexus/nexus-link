@@ -9,7 +9,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.7.4"
+version = "0.8.0"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["RELICFROG Consulting <dev@relicfrog.rocks>"]
@@ -52,6 +52,10 @@ anyhow = "1"
 sha2 = "0.10"
 base64 = "0.22"
 rand = "0.9"
+
+# Crypto (Ed25519 signed commands — ADR-0051 v2)
+ed25519-dalek = { version = "2", features = ["std"] }
+hex = "0.4"
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
