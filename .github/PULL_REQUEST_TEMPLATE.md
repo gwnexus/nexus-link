@@ -13,9 +13,9 @@ Brief description of the change.
 
 ## Changes
 
-- 
-- 
-- 
+-
+-
+-
 
 ## Device Testing
 
