@@ -7,7 +7,7 @@ assignees: ''
 ---
 
 > **For critical vulnerabilities, do NOT use this template.**
-> Email **security@gatewarden.eu** directly. See [SECURITY.md](../../SECURITY.md).
+> Email **post+security@gatewarden.eu** directly. See [SECURITY.md](../../SECURITY.md).
 
 ## Summary
 

@@ -9,10 +9,10 @@ members = [
 ]
 
 [workspace.package]
-version = "0.8.1"
+version = "0.8.2"
 edition = "2024"
 license = "Apache-2.0"
-authors = ["RELICFROG Consulting <dev@relicfrog.rocks>"]
+authors = ["RELICFROG Consulting <post+dev@gatewarden.eu>"]
 repository = "https://github.com/gwnexus/nexus-link"
 
 [workspace.dependencies]

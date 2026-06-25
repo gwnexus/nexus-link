@@ -2,7 +2,7 @@
 
 ## Maintainers
 
-- **RelicFrog Holding UG (haftungsbeschraenkt)** -- <dev@relicfrog.rocks>
+- **RelicFrog Holding UG (haftungsbeschraenkt)** -- <post+dev@gatewarden.eu>
 
 ## Contributors
 
@@ -17,5 +17,5 @@ RelicFrog Holding UG (haftungsbeschraenkt).
 
 ## Contact
 
-- General: <dev@relicfrog.rocks>
-- Security: <security@gatewarden.eu>
+- General: <post+dev@gatewarden.eu>
+- Security: <post+security@gatewarden.eu>

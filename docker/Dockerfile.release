@@ -1,0 +1,37 @@
+# Dockerfile.release
+#
+# Minimal runtime image for nexus-link-service.
+# Does NOT compile anything — the binary is injected via --build-arg at
+# build time from the pre-built cross-compiled artifact.
+#
+# Usage (in CI, after cross build):
+#   docker build \
+#     --build-arg BINARY=nexus-link-service \
+#     -f docker/Dockerfile.release \
+#     -t ghcr.io/gwnexus/nexus-link/nexus-link-service:0.8.1 .
+#
+# The binary must be placed at dist/nexus-link-service relative to
+# the build context (extracted from the cross-compiled tarball).
+
+FROM debian:bookworm-slim
+
+ARG BINARY=nexus-link-service
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -r -s /bin/false nexus-link
+
+COPY dist/${BINARY} /usr/local/bin/nexus-link-service
+
+RUN chmod +x /usr/local/bin/nexus-link-service
+
+USER nexus-link
+
+EXPOSE 8443
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8443/api/health || exit 1
+
+ENTRYPOINT ["nexus-link-service"]
