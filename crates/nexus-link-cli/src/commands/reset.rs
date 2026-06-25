@@ -81,12 +81,12 @@ fn stop_service(service: &str) {
         .args(["--user", "stop", service])
         .output();
 
-    if let Ok(o) = user_stop {
-        if o.status.success() {
-            println!("  Stopped (user service): {}", service);
-            disable_service(service, true);
-            return;
-        }
+    if let Ok(o) = user_stop
+        && o.status.success()
+    {
+        println!("  Stopped (user service): {}", service);
+        disable_service(service, true);
+        return;
     }
 
     // Try system-wide
@@ -94,12 +94,12 @@ fn stop_service(service: &str) {
         .args(["stop", service])
         .output();
 
-    if let Ok(o) = system_stop {
-        if o.status.success() {
-            println!("  Stopped (system service): {}", service);
-            disable_service(service, false);
-            return;
-        }
+    if let Ok(o) = system_stop
+        && o.status.success()
+    {
+        println!("  Stopped (system service): {}", service);
+        disable_service(service, false);
+        return;
     }
 
     // Fall back to pkill
@@ -122,10 +122,10 @@ fn disable_service(service: &str, user: bool) {
 
     let result = std::process::Command::new("systemctl").args(&args).output();
 
-    if let Ok(o) = result {
-        if o.status.success() {
-            info!("Disabled service: {}", service);
-        }
+    if let Ok(o) = result
+        && o.status.success()
+    {
+        info!("Disabled service: {}", service);
     }
 }
 
