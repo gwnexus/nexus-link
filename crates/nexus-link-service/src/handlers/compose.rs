@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::time::timeout;
-use tokio_stream::wrappers::LinesStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::LinesStream;
 use tracing::{error, info, warn};
 
 use crate::state::SharedState;
@@ -113,9 +113,9 @@ fn read_extra_files(dir: &Path, extensions: &[String]) -> Vec<ComposeFileEntry> 
         if name == "docker-compose.yaml" || name == "docker-compose.yml" {
             continue;
         }
-        let matches = extensions
-            .iter()
-            .any(|ext| name.ends_with(ext.as_str()) || name.starts_with(ext.trim_start_matches('.')));
+        let matches = extensions.iter().any(|ext| {
+            name.ends_with(ext.as_str()) || name.starts_with(ext.trim_start_matches('.'))
+        });
         if !matches {
             continue;
         }
@@ -196,10 +196,7 @@ pub async fn get_compose_file(
     let compose_path = find_compose_file(compose_dir).ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
-            format!(
-                "No docker-compose.yaml found in {}",
-                compose_dir.display()
-            ),
+            format!("No docker-compose.yaml found in {}", compose_dir.display()),
         )
     })?;
 

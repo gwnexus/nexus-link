@@ -1,5 +1,5 @@
-use axum::{extract::State, http::StatusCode, middleware::Next, response::Response};
 use axum::extract::Request;
+use axum::{extract::State, http::StatusCode, middleware::Next, response::Response};
 use tracing::warn;
 
 use crate::state::SharedState;

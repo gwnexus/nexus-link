@@ -152,7 +152,18 @@ async fn main() -> anyhow::Result<()> {
             tags,
             skip_preflight,
             force,
-        } => commands::register::execute(api_url, token, cmd_token, name, tags, skip_preflight, force).await,
+        } => {
+            commands::register::execute(
+                api_url,
+                token,
+                cmd_token,
+                name,
+                tags,
+                skip_preflight,
+                force,
+            )
+            .await
+        }
         Commands::Preflight => {
             let report = nexus_link_core::preflight::run_preflight();
             nexus_link_core::preflight::print_report(&report);

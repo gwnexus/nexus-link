@@ -42,10 +42,7 @@ pub async fn show() -> anyhow::Result<()> {
         config.compose.extra_extensions.join(", ")
     );
     match &config.compose.cmd_token {
-        Some(t) => println!(
-            "  cmd_token        = {}...",
-            &t[..20.min(t.len())]
-        ),
+        Some(t) => println!("  cmd_token        = {}...", &t[..20.min(t.len())]),
         None => println!("  cmd_token        = (not configured — C&C channel disabled)"),
     }
     match &config.compose.signing_public_key {
@@ -105,7 +102,11 @@ pub async fn set(key: String, value: String) -> anyhow::Result<()> {
             if !value.is_empty() && !nexus_link_core::token::validate_cmd_token_format(&value) {
                 anyhow::bail!("Invalid cmd_token format. Expected: nxs_cmd_<...>");
             }
-            config.compose.cmd_token = if value.is_empty() { None } else { Some(value.clone()) };
+            config.compose.cmd_token = if value.is_empty() {
+                None
+            } else {
+                Some(value.clone())
+            };
             println!("  compose.cmd_token = {}...", &value[..20.min(value.len())]);
         }
         "compose.require_signatures" | "require_signatures" => {
@@ -146,9 +147,10 @@ pub async fn get(key: String) -> anyhow::Result<()> {
         "node.tags" | "tags" => config.node.tags.join(","),
         "node.token" | "token" => config.node.token,
         "compose.dir" | "compose_dir" => config.compose.dir.to_string_lossy().to_string(),
-        "compose.cmd_token" | "cmd_token" => {
-            config.compose.cmd_token.unwrap_or_else(|| "(not configured)".to_string())
-        }
+        "compose.cmd_token" | "cmd_token" => config
+            .compose
+            .cmd_token
+            .unwrap_or_else(|| "(not configured)".to_string()),
         "compose.require_signatures" | "require_signatures" => {
             config.compose.require_signatures.to_string()
         }

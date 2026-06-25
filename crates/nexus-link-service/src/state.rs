@@ -22,7 +22,11 @@ impl AppState {
     pub fn new(config: Config) -> anyhow::Result<Self> {
         let docker = Docker::connect_with_local_defaults()?;
         let signing_pubkey = load_signing_pubkey(&config);
-        Ok(Self { config, docker, signing_pubkey })
+        Ok(Self {
+            config,
+            docker,
+            signing_pubkey,
+        })
     }
 }
 

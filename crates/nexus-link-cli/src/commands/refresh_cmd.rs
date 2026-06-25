@@ -38,7 +38,10 @@ pub async fn execute(cmd_token: String) -> anyhow::Result<()> {
     config.compose.cmd_token = Some(cmd_token);
     config.save()?;
 
-    println!("  C&C token updated. compose.cmd_token prefix: {}...", prefix);
+    println!(
+        "  C&C token updated. compose.cmd_token prefix: {}...",
+        prefix
+    );
     println!("  Effective immediately — no service restart required.");
 
     Ok(())

@@ -1,4 +1,6 @@
-use nexus_link_core::config::{ApiConfig, ComposeConfig, Config, NodeConfig, ServiceConfig, dirs_home};
+use nexus_link_core::config::{
+    ApiConfig, ComposeConfig, Config, NodeConfig, ServiceConfig, dirs_home,
+};
 use nexus_link_core::preflight::{self, PreflightVerdict};
 use nexus_link_core::types::RegisterRequest;
 use tracing::info;
