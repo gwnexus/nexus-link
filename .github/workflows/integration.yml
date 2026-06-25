@@ -1,15 +1,10 @@
 name: Integration Tests
 
+# Temporarily disabled — triggers only on manual dispatch.
+# Re-enable push/pull_request triggers after E2E test on DGX Spark is complete.
+# Nexus task: 90d82c80-838f-43aa-8279-2bc43c075864
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-# Temporarily disabled — re-enable after E2E test on DGX Spark is complete.
-# Tracked in Nexus task: Re-enable Integration Test workflow in CI
-# (task: 90d82c80-838f-43aa-8279-2bc43c075864)
-if: false
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
