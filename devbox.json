@@ -58,7 +58,8 @@
       ]
     },
     "init_hook": [
-      "scripts/devbox/dbx_init.sh"
+      "scripts/devbox/dbx_init.sh",
+      "pre-commit install --install-hooks 2>/dev/null || true"
     ]
   },
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.17.1/.schema/devbox.schema.json",
@@ -108,7 +109,7 @@
     "cargo-deny": "latest",
     "commitizen": "3.29.1",
     "pkg-config": "latest",
-    "pre-commit": "3.7.1",
+    "pre-commit": "4.5.1",
     "typescript": "latest",
     "cargo-audit": "latest",
     "cargo-nextest": "latest",

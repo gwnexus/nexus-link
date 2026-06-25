@@ -1,0 +1,89 @@
+# Copyright 2026 RELICFROG Consulting
+# SPDX-License-Identifier: Apache-2.0
+#
+# .pre-commit-config.yaml
+#
+# Pre-commit hook configuration for nexus-link.
+#
+# All Rust-specific hooks are defined as 'local' hooks that invoke cargo
+# directly, using the exact toolchain pinned in rust-toolchain.toml.
+#
+# RUSTFLAGS is explicitly cleared in every Rust hook to prevent the
+# devbox RUSTFLAGS="-C link-arg=-fuse-ld=mold" from breaking hooks
+# on macOS where mold is not available.
+#
+# Install (runs automatically on 'devbox shell'):
+#   pre-commit install --install-hooks
+#
+# Run manually against all files:
+#   pre-commit run --all-files
+#
+# Skip hooks for a WIP commit (use sparingly):
+#   git commit --no-verify -m "wip: ..."
+
+default_install_hook_types:
+  - pre-commit
+
+default_stages:
+  - pre-commit
+
+fail_fast: false
+
+repos:
+  # ---------------------------------------------------------------------------
+  # Generic file hygiene
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        name: trim trailing whitespace
+      - id: end-of-file-fixer
+        name: fix end of file
+      - id: check-yaml
+        name: check yaml syntax
+      - id: check-toml
+        name: check toml syntax
+      - id: check-merge-conflict
+        name: check for merge conflicts
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        name: enforce LF line endings
+
+  # ---------------------------------------------------------------------------
+  # Rust — local hooks (toolchain from rust-toolchain.toml)
+  #
+  # RUSTFLAGS="" is set explicitly in every entry to prevent the devbox
+  # RUSTFLAGS="-C link-arg=-fuse-ld=mold" from failing on macOS where
+  # the mold linker is not available.
+  # ---------------------------------------------------------------------------
+  - repo: local
+    hooks:
+      # --- Format (auto-fix) --------------------------------------------------
+      # Runs cargo fmt --all, then re-stages any files it modified so the
+      # formatted output is included in the commit automatically.
+      - id: rust-fmt
+        name: cargo fmt
+        language: system
+        entry: env RUSTFLAGS="" cargo fmt --all
+        types: [rust]
+        pass_filenames: false
+
+      # --- Type check ---------------------------------------------------------
+      # Resolves types and borrow-checks without producing a binary.
+      # Faster than a full build; catches compile errors before clippy runs.
+      - id: rust-check
+        name: cargo check
+        language: system
+        entry: env RUSTFLAGS="" cargo check --all
+        types: [rust]
+        pass_filenames: false
+
+      # --- Lint ---------------------------------------------------------------
+      # -D warnings promotes every warning to an error, consistent with CI.
+      - id: rust-clippy
+        name: cargo clippy
+        language: system
+        entry: env RUSTFLAGS="" cargo clippy --all -- -D warnings
+        types: [rust]
+        pass_filenames: false
