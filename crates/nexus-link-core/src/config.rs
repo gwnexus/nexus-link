@@ -57,6 +57,13 @@ pub struct ComposeConfig {
     /// Default: false (v1 — set to true once backend signing is deployed).
     #[serde(default)]
     pub require_signatures: bool,
+
+    /// How often (in seconds) the command queue is polled from the Nexus backend.
+    /// Independent of the telemetry push interval.
+    /// Default: 2 — fast enough for responsive UI without excessive load.
+    /// Only active when cmd_token is configured.
+    #[serde(default = "default_command_poll_secs")]
+    pub command_poll_secs: u64,
 }
 
 impl Default for ComposeConfig {
@@ -67,6 +74,7 @@ impl Default for ComposeConfig {
             cmd_token: None,
             signing_public_key: None,
             require_signatures: false,
+            command_poll_secs: default_command_poll_secs(),
         }
     }
 }
@@ -148,7 +156,7 @@ impl Config {
 }
 
 fn default_push_interval() -> u64 {
-    10
+    6
 }
 
 fn default_listen_addr() -> String {
@@ -165,4 +173,8 @@ fn default_compose_dir() -> PathBuf {
 
 fn default_compose_extra_extensions() -> Vec<String> {
     vec![".env".into(), ".conf".into(), ".toml".into()]
+}
+
+fn default_command_poll_secs() -> u64 {
+    2
 }

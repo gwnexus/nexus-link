@@ -1173,6 +1173,7 @@ dependencies = [
  "futures-util",
  "hex",
  "nexus-link-core",
+ "reqwest",
  "serde",
  "serde_json",
  "serde_yaml",

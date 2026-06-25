@@ -1,15 +1,17 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::{Router, middleware as axum_mw};
 use nexus_link_core::config::Config;
 use tokio::signal;
 use tower_http::trace::TraceLayer;
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 mod handlers;
 mod middleware;
+mod poller;
 mod state;
 
 use middleware::auth::require_auth;
@@ -33,21 +35,45 @@ async fn main() -> anyhow::Result<()> {
     let addr = SocketAddr::new(config.service.listen_addr.parse()?, config.service.port);
 
     info!(
-        compose_root = %config.compose.dir.display(),
-        cmd_channel  = config.compose.cmd_token.is_some(),
-        signatures   = config.compose.require_signatures,
+        compose_root     = %config.compose.dir.display(),
+        cmd_channel      = config.compose.cmd_token.is_some(),
+        signatures       = config.compose.require_signatures,
+        command_poll_s   = config.compose.command_poll_secs,
         "Compose channel configured"
     );
 
-    let state = Arc::new(AppState::new(config)?);
+    let state = Arc::new(AppState::new(config.clone())?);
 
-    // Command routes — protected by node token (nxs_node_*)
+    // ── Command queue poll loop ────────────────────────────────────────────
+    // Only start when the C&C channel is configured (cmd_token present).
+    // Runs as an independent tokio task — isolated from the HTTP server.
+    if config.compose.cmd_token.is_some() {
+        let poll_state = Arc::clone(&state);
+        let poll_interval = Duration::from_secs(config.compose.command_poll_secs);
+        tokio::spawn(async move {
+            info!(
+                interval_s = poll_interval.as_secs(),
+                "Command queue poll loop started"
+            );
+            let mut interval = tokio::time::interval(poll_interval);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                if let Err(e) = poller::poll_and_execute(&poll_state).await {
+                    warn!("Command queue poll error: {}", e);
+                }
+            }
+        });
+    } else {
+        info!("C&C channel not configured — command queue poll loop disabled");
+    }
+
+    // ── HTTP server ────────────────────────────────────────────────────────
     let command_routes = handlers::command_routes().layer(axum_mw::from_fn_with_state(
         Arc::clone(&state),
         require_auth,
     ));
 
-    // Compose routes — protected by C&C token (nxs_cmd_*)
     let compose_routes = handlers::compose_routes().layer(axum_mw::from_fn_with_state(
         Arc::clone(&state),
         require_cmd_auth,

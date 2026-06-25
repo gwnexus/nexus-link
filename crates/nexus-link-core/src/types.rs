@@ -1,44 +1,39 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Command types that can be sent from Nexus backend to the node
+// ---------------------------------------------------------------------------
+// Legacy command types (POST /api/commands — inbound from Nexus backend)
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload")]
 pub enum NodeCommand {
     #[serde(rename = "compose_restart")]
     ComposeRestart(ComposeRestartPayload),
-
     #[serde(rename = "compose_logs")]
     ComposeLogs(ComposeLogsPayload),
-
     #[serde(rename = "config_exchange")]
     ConfigExchange(ConfigExchangePayload),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposeRestartPayload {
-    /// Optional: specific service to restart (None = all)
     pub service: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposeLogsPayload {
-    /// Service name to fetch logs from
     pub service: String,
-    /// Number of tail lines
     #[serde(default = "default_tail_lines")]
     pub tail: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigExchangePayload {
-    /// Configuration key to exchange
     pub key: String,
-    /// Optional new value (None = read-only)
     pub value: Option<serde_json::Value>,
 }
 
-/// Response to a command execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandResponse {
     pub success: bool,
@@ -47,46 +42,75 @@ pub struct CommandResponse {
     pub data: Option<serde_json::Value>,
 }
 
-/// Node registration request
+// ---------------------------------------------------------------------------
+// Registration
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterRequest {
     pub name: String,
-    /// Detected private IP address (e.g. 10.0.10.121)
     pub private_ip: Option<String>,
     pub tags: Vec<String>,
     pub description: Option<String>,
-    /// Service endpoint derived from private IP (e.g. 10.0.10.121:8443).
-    /// Used as public_endpoint when none is already set on the node record.
-    /// For WireGuard/LAN-only deployments this is the only reachable address.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_endpoint: Option<String>,
 }
 
-/// Node registration response from backend
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterResponse {
-    /// Assigned node ID (UUID)
     pub node_id: String,
-    /// Node token (nxs_node_*) — identity / telemetry credential
     pub token: String,
-    /// C&C command token (nxs_cmd_*) — compose management credential.
-    /// Present when the backend supports ADR-0051. May be None for older
-    /// backends; in that case compose routes will return 403 until set
-    /// manually via `nexus-link config set compose.cmd_token <token>`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cmd_token: Option<String>,
-    /// Ed25519 public key (base64url, 32 bytes) for verifying signed
-    /// commands from the Nexus backend. Written to ~/.nexus-link/signing_key.pub.
-    /// None on older backends — signature verification stays disabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signing_public_key: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
-// Compose file management types
+// Compose command queue (ADR-0049 reverse-agent pattern)
 // ---------------------------------------------------------------------------
 
-/// Metadata entry for a single file in the compose root
+/// Command types supported by the compose command queue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComposeCommandType {
+    GetFile,
+    PutFile,
+    Activate,
+    GetLogsSnapshot,
+}
+
+/// A pending command item returned by GET .../compose/commands/pending
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComposeCommandItem {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub command_type: ComposeCommandType,
+    #[serde(default)]
+    pub args: serde_json::Value,
+}
+
+/// Result the device sends to PATCH .../compose/commands/:id
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComposeCommandResult {
+    pub status: ComposeCommandStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComposeCommandStatus {
+    Completed,
+    Failed,
+}
+
+// ---------------------------------------------------------------------------
+// Legacy compose file management types (kept for local API compat)
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposeFileEntry {
     pub filename: String,
@@ -94,14 +118,12 @@ pub struct ComposeFileEntry {
     pub modified_at: DateTime<Utc>,
 }
 
-/// Response for GET /api/compose/files
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposeFileListResponse {
     pub compose_root: String,
     pub files: Vec<ComposeFileEntry>,
 }
 
-/// Response for GET /api/compose/files/:filename
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposeFileContent {
     pub filename: String,
@@ -110,16 +132,13 @@ pub struct ComposeFileContent {
     pub modified_at: DateTime<Utc>,
 }
 
-/// Request body for PUT /api/compose/files/:filename
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposeFileWriteRequest {
     pub content: String,
-    /// Optional human-readable commit message (logged server-side)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
 
-/// Response for PUT /api/compose/files/:filename
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposeFileWriteResponse {
     pub success: bool,
@@ -127,7 +146,6 @@ pub struct ComposeFileWriteResponse {
     pub size_bytes: u64,
 }
 
-/// Response for POST /api/compose/apply
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposeApplyResponse {
     pub success: bool,
@@ -135,7 +153,6 @@ pub struct ComposeApplyResponse {
     pub output: String,
 }
 
-/// Response for GET /api/compose/logs[/:service]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposeLogsResponse {
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -130,6 +130,7 @@ fn test_config_roundtrip_with_custom_compose_dir() {
             cmd_token: Some("nxs_cmd_testtoken".to_string()),
             signing_public_key: None,
             require_signatures: false,
+            command_poll_secs: 2,
         },
     };
 
