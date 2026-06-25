@@ -3,6 +3,7 @@ pub mod config;
 pub mod refresh;
 pub mod refresh_cmd;
 pub mod register;
+pub mod reset;
 pub mod status;
 pub mod unregister;
 pub mod upgrade;

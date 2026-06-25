@@ -81,6 +81,15 @@ enum Commands {
         force: bool,
     },
 
+    /// Hard-reset this device: remove all credentials and keys, stop and
+    /// disable all nexus-link services. Use after deleting the node in the
+    /// Nexus dashboard to prepare for clean re-registration.
+    Reset {
+        /// Skip confirmation prompt
+        #[arg(long)]
+        force: bool,
+    },
+
     /// Upgrade nexus-link to the latest release
     Upgrade {
         /// Force re-download even if already on latest version
@@ -178,6 +187,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::RefreshCmd { cmd_token } => commands::refresh_cmd::execute(cmd_token).await,
         Commands::Status => commands::status::execute().await,
         Commands::Unregister { force } => commands::unregister::execute(force).await,
+        Commands::Reset { force } => commands::reset::execute(force).await,
         Commands::Upgrade { force } => commands::upgrade::execute(force).await,
         Commands::Config { action } => match action {
             ConfigAction::Show => commands::config::show().await,
