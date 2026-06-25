@@ -62,6 +62,11 @@
       "pre-commit install --install-hooks 2>/dev/null || true"
     ]
   },
+    "init_hook": [
+      "scripts/devbox/dbx_init.sh",
+      "pre-commit install --install-hooks 2>/dev/null || true"
+    ]
+  },
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.17.1/.schema/devbox.schema.json",
   "packages": {
     "fd": "latest",

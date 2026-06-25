@@ -1,24 +1,28 @@
 # Copyright 2026 RELICFROG Consulting
 # SPDX-License-Identifier: Apache-2.0
 #
-# .pre-commit-config.yaml
+# .pre-commit-config.yaml — nexus-link
 #
-# Pre-commit hook configuration for nexus-link.
+# Pre-commit hook configuration for nexus-link (Rust workspace).
 #
 # All Rust-specific hooks are defined as 'local' hooks that invoke cargo
 # directly, using the exact toolchain pinned in rust-toolchain.toml.
 #
 # RUSTFLAGS is explicitly cleared in every Rust hook to prevent the
-# devbox RUSTFLAGS="-C link-arg=-fuse-ld=mold" from breaking hooks
-# on macOS where mold is not available.
+# devbox RUSTFLAGS="-C link-arg=-fuse-ld=mold" from failing on macOS
+# where the mold linker is not available.
 #
-# Install (runs automatically on 'devbox shell'):
+# The devbox init_hook installs the hooks automatically on 'devbox shell':
+#   pre-commit install --install-hooks
+#
+# To install or re-install manually inside the devbox shell:
+#   pre-commit install
 #   pre-commit install --install-hooks
 #
 # Run manually against all files:
 #   pre-commit run --all-files
 #
-# Skip hooks for a WIP commit (use sparingly):
+# Skip hooks for a WIP commit (use sparingly, never on main):
 #   git commit --no-verify -m "wip: ..."
 
 default_install_hook_types:
@@ -34,7 +38,7 @@ repos:
   # Generic file hygiene
   # ---------------------------------------------------------------------------
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
         name: trim trailing whitespace
@@ -53,19 +57,38 @@ repos:
   # ---------------------------------------------------------------------------
   # Rust — local hooks (toolchain from rust-toolchain.toml)
   #
-  # RUSTFLAGS="" is set explicitly in every entry to prevent the devbox
+  # RUSTFLAGS="" is set explicitly in every Rust hook to prevent the devbox
   # RUSTFLAGS="-C link-arg=-fuse-ld=mold" from failing on macOS where
   # the mold linker is not available.
+  #
+  # Hook execution order:
+  #   1. rust-fmt       — auto-format (cargo fmt --all)
+  #   2. rust-fix       — auto-apply machine-applicable cargo suggestions
+  #   3. rust-check     — type + borrow check (no binary produced)
+  #   4. rust-clippy    — lint with -D warnings (consistent with CI)
   # ---------------------------------------------------------------------------
   - repo: local
     hooks:
       # --- Format (auto-fix) --------------------------------------------------
-      # Runs cargo fmt --all, then re-stages any files it modified so the
-      # formatted output is included in the commit automatically.
+      # Runs cargo fmt --all. If any file is reformatted the hook exits
+      # non-zero so the commit is aborted. Stage the formatted files and
+      # commit again — the second run will pass.
       - id: rust-fmt
         name: cargo fmt
         language: system
         entry: env RUSTFLAGS="" cargo fmt --all
+        types: [rust]
+        pass_filenames: false
+
+      # --- Auto-fix (machine-applicable suggestions) --------------------------
+      # Applies simple, safe compiler suggestions (unused imports, trivial
+      # reformulations) that cargo can patch automatically. Uses
+      # --allow-staged so it operates on the staged snapshot, not the
+      # working tree, keeping the commit atomic.
+      - id: rust-fix
+        name: cargo fix
+        language: system
+        entry: env RUSTFLAGS="" cargo fix --allow-staged --allow-dirty
         types: [rust]
         pass_filenames: false
 
@@ -80,7 +103,8 @@ repos:
         pass_filenames: false
 
       # --- Lint ---------------------------------------------------------------
-      # -D warnings promotes every warning to an error, consistent with CI.
+      # -D warnings promotes every clippy warning to an error, consistent
+      # with CI. Runs last — only reached if fmt + fix + check all pass.
       - id: rust-clippy
         name: cargo clippy
         language: system
