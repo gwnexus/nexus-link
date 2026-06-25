@@ -59,10 +59,10 @@ pub async fn execute(
     }
 
     // Validate cmd_token format if provided
-    if let Some(ref ct) = cmd_token {
-        if !nexus_link_core::token::validate_cmd_token_format(ct) {
-            anyhow::bail!("Invalid cmd-token format. Expected: nxs_cmd_<...>");
-        }
+    if let Some(ref ct) = cmd_token
+        && !nexus_link_core::token::validate_cmd_token_format(ct)
+    {
+        anyhow::bail!("Invalid cmd-token format. Expected: nxs_cmd_<...>");
     }
 
     let client = reqwest::Client::new();
