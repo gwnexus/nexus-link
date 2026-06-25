@@ -147,8 +147,8 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Assemble the multi-arch manifest from the two platform-specific images.
-  # The manifest is what users pull when they run: docker pull <image>
-  # Docker automatically selects the correct platform layer.
+  # Uses 'docker buildx imagetools create' which correctly merges existing
+  # manifest lists produced by build-push-action (unlike 'docker manifest').
   # ---------------------------------------------------------------------------
   publish-manifest:
     name: Publish Multi-Arch Manifest
@@ -166,6 +166,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
+
       - name: Extract version tag
         id: meta
         run: |
@@ -181,24 +184,13 @@ jobs:
           VERSION=${{ steps.meta.outputs.version }}
           MINOR=${{ steps.meta.outputs.minor }}
 
-          # Manifest for exact version (e.g. 0.8.1)
-          docker manifest create ${IMAGE}:${VERSION} \
+          # imagetools create merges existing manifest lists — works with buildx output
+          docker buildx imagetools create \
+            --tag ${IMAGE}:${VERSION} \
+            --tag ${IMAGE}:${MINOR} \
+            --tag ${IMAGE}:latest \
             ${IMAGE}:${VERSION}-arm64 \
             ${IMAGE}:${VERSION}-amd64
-
-          # Manifest for minor version (e.g. 0.8)
-          docker manifest create ${IMAGE}:${MINOR} \
-            ${IMAGE}:${VERSION}-arm64 \
-            ${IMAGE}:${VERSION}-amd64
-
-          # Manifest for latest
-          docker manifest create ${IMAGE}:latest \
-            ${IMAGE}:${VERSION}-arm64 \
-            ${IMAGE}:${VERSION}-amd64
-
-          docker manifest push ${IMAGE}:${VERSION}
-          docker manifest push ${IMAGE}:${MINOR}
-          docker manifest push ${IMAGE}:latest
 
   # ---------------------------------------------------------------------------
   # Create the GitHub Release with binary tarballs attached.
