@@ -68,9 +68,9 @@ pub async fn execute(
     // Detect private IP — used as the service endpoint when no public DNS is available.
     // For nodes behind WireGuard / LAN-only setups this is the only reachable address.
     let private_ip = nexus_link_core::network::detect_private_ip();
-    let public_endpoint = private_ip.as_deref().map(|ip| {
-        nexus_link_core::network::format_service_endpoint(ip, 8443)
-    });
+    let public_endpoint = private_ip
+        .as_deref()
+        .map(|ip| nexus_link_core::network::format_service_endpoint(ip, 8443));
 
     if let Some(ref ep) = public_endpoint {
         println!("  Detected private IP → service endpoint: {}", ep);
