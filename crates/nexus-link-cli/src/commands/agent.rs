@@ -62,7 +62,7 @@ pub async fn start() -> anyhow::Result<()> {
     systemctl("start", AGENT_SERVICE_NAME, mode)?;
     println!(
         "  Agent:   started (telemetry push every {}s)",
-        config.api.push_interval_secs
+        config.agent.push_sec
     );
 
     systemctl("enable", SERVICE_SERVICE_NAME, mode)?;

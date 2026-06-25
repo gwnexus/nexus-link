@@ -35,21 +35,19 @@ async fn main() -> anyhow::Result<()> {
     let addr = SocketAddr::new(config.service.listen_addr.parse()?, config.service.port);
 
     info!(
-        compose_root     = %config.compose.dir.display(),
-        cmd_channel      = config.compose.cmd_token.is_some(),
-        signatures       = config.compose.require_signatures,
-        command_poll_s   = config.compose.command_poll_secs,
+        compose_root   = %config.compose.dir.display(),
+        cmd_channel    = config.compose.cmd_token.is_some(),
+        signatures     = config.compose.require_signatures,
+        poll_sec       = config.agent.poll_sec,
         "Compose channel configured"
     );
 
     let state = Arc::new(AppState::new(config.clone())?);
 
     // ── Command queue poll loop ────────────────────────────────────────────
-    // Only start when the C&C channel is configured (cmd_token present).
-    // Runs as an independent tokio task — isolated from the HTTP server.
     if config.compose.cmd_token.is_some() {
         let poll_state = Arc::clone(&state);
-        let poll_interval = Duration::from_secs(config.compose.command_poll_secs);
+        let poll_interval = Duration::from_secs(config.agent.poll_sec);
         tokio::spawn(async move {
             info!(
                 interval_s = poll_interval.as_secs(),

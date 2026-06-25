@@ -1,5 +1,6 @@
 use nexus_link_core::config::{
-    ApiConfig, ComposeConfig, Config, NodeConfig, ServiceConfig, dirs_home,
+    AgentConfig, ApiConfig, ApiTokens, ComposeConfig, Config, NodeConfig, ServiceConfig,
+    TokenEntry, dirs_home,
 };
 use nexus_link_core::preflight::{self, PreflightVerdict};
 use nexus_link_core::types::RegisterRequest;
@@ -102,22 +103,19 @@ pub async fn execute(
 
     let register_resp: nexus_link_core::types::RegisterResponse = resp.json().await?;
 
-    // Prefer the cmd_token from the backend response; fall back to the CLI flag.
+    // Save config locally — new [api.tokens] + [agent] layout
     let resolved_cmd_token = register_resp.cmd_token.clone().or(cmd_token);
-
-    // Prefer signing_public_key from the backend response.
     let signing_public_key = register_resp.signing_public_key.clone();
 
-    // Write signing_key.pub to ~/.nexus-link/ if the backend provided one
-    if let Some(ref pubkey_b64) = signing_public_key {
-        let home = dirs_home();
-        std::fs::create_dir_all(&home)?;
-        let key_path = home.join("signing_key.pub");
-        std::fs::write(&key_path, pubkey_b64)?;
-        println!("  Signing key: {}", key_path.display());
-    }
+    let telemetry_entry = TokenEntry {
+        token: register_resp.token.clone(),
+        scope: "read".to_string(),
+    };
+    let command_entry = resolved_cmd_token.as_deref().map(|t| TokenEntry {
+        token: t.to_string(),
+        scope: "read_write".to_string(),
+    });
 
-    // Save config locally
     let config = Config {
         node: NodeConfig {
             node_id: register_resp.node_id.clone(),
@@ -127,17 +125,31 @@ pub async fn execute(
         },
         api: ApiConfig {
             base_url: api_url,
-            push_interval_secs: 10,
+            tokens: ApiTokens {
+                telemetry: Some(telemetry_entry),
+                command: command_entry,
+            },
+            push_interval_secs: None,
         },
+        agent: AgentConfig::default(), // push_sec=6, poll_sec=2
         service: ServiceConfig::default(),
         compose: ComposeConfig {
             cmd_token: resolved_cmd_token,
-            signing_public_key,
+            signing_public_key: signing_public_key.clone(),
             ..ComposeConfig::default()
         },
     };
 
     config.save()?;
+
+    // Write signing_key.pub if the backend provided one
+    if let Some(ref pubkey_b64) = signing_public_key {
+        let home = dirs_home();
+        std::fs::create_dir_all(&home)?;
+        let key_path = home.join("signing_key.pub");
+        std::fs::write(&key_path, pubkey_b64)?;
+        println!("  Signing key: {}", key_path.display());
+    }
 
     println!("Node registered successfully!");
     println!("  Node ID: {}", register_resp.node_id);

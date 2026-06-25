@@ -12,7 +12,7 @@ pub async fn push_telemetry(config: &Config, payload: &TelemetryPayload) -> anyh
     let client = reqwest::Client::new();
     let resp = client
         .post(&url)
-        .bearer_auth(&config.node.token)
+        .bearer_auth(config.node_token())
         .json(payload)
         .send()
         .await?;

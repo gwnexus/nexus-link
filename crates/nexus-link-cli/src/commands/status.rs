@@ -8,7 +8,10 @@ pub async fn execute() -> anyhow::Result<()> {
     println!("  Node ID:    {}", config.node.node_id);
     println!("  Name:       {}", config.node.name);
     println!("  API:        {}", config.api.base_url);
-    println!("  Interval:   {}s", config.api.push_interval_secs);
+    println!(
+        "  Interval:   {}s push / {}s poll",
+        config.agent.push_sec, config.agent.poll_sec
+    );
     println!(
         "  Service:    {}:{}",
         config.service.listen_addr, config.service.port

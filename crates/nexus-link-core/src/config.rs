@@ -14,10 +14,41 @@ pub fn dirs_home() -> PathBuf {
 }
 
 /// Main configuration stored in ~/.nexus-link/config.toml
+///
+/// On-disk format (v0.8.4+):
+/// ```toml
+/// [node]
+/// node_id = "..."
+/// name    = "spark-ccd9"
+///
+/// [api]
+/// base_url = "https://nexus.gatewarden.eu"
+///
+/// [api.tokens]
+/// telemetry = { token = "nxs_node_...", scope = "read" }
+/// command   = { token = "nxs_cmd_...",  scope = "read_write" }
+///
+/// [agent]
+/// push_sec = 6
+/// poll_sec = 2
+///
+/// [service]
+/// listen_addr = "0.0.0.0"
+/// port        = 8443
+///
+/// [compose]
+/// dir                = "/opt/dgx-llm"
+/// extra_extensions   = [".env", ".conf", ".toml"]
+/// signing_public_key = "..."
+/// require_signatures = false
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub node: NodeConfig,
     pub api: ApiConfig,
+
+    #[serde(default)]
+    pub agent: AgentConfig,
 
     #[serde(default)]
     pub service: ServiceConfig,
@@ -26,7 +57,101 @@ pub struct Config {
     pub compose: ComposeConfig,
 }
 
-/// Configuration for Docker Compose management and C&C channel
+// ---------------------------------------------------------------------------
+// [api] + [api.tokens]
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiConfig {
+    /// Nexus backend base URL
+    pub base_url: String,
+
+    /// Token credentials for the two nexus-link channels.
+    #[serde(default)]
+    pub tokens: ApiTokens,
+
+    // ── Backward-compatibility aliases ────────────────────────────────────
+    // Old config.toml files write push_interval_secs directly under [api].
+    // We deserialize them here and migrate on first save.
+    /// @deprecated — use [agent] push_sec instead. Kept for migration only.
+    #[serde(default, skip_serializing)]
+    pub push_interval_secs: Option<u64>,
+}
+
+/// [api.tokens] — inline tables for the two credential channels.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ApiTokens {
+    /// Telemetry channel (nxs_node_*) — read-only, push-based.
+    #[serde(default)]
+    pub telemetry: Option<TokenEntry>,
+
+    /// Command channel (nxs_cmd_*) — read_write, poll-based.
+    #[serde(default)]
+    pub command: Option<TokenEntry>,
+}
+
+/// A single token entry in [api.tokens].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenEntry {
+    pub token: String,
+    /// "read" or "read_write"
+    pub scope: String,
+}
+
+// ---------------------------------------------------------------------------
+// [agent] — runtime behavior (intervals)
+// ---------------------------------------------------------------------------
+
+/// [agent] — controls push and poll intervals for both daemons.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentConfig {
+    /// Telemetry push interval in seconds (nexus-link-agent).
+    /// Default: 6
+    #[serde(default = "default_push_sec")]
+    pub push_sec: u64,
+
+    /// Command queue poll interval in seconds (nexus-link-service).
+    /// Default: 2
+    #[serde(default = "default_poll_sec")]
+    pub poll_sec: u64,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            push_sec: default_push_sec(),
+            poll_sec: default_poll_sec(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// [node]
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeConfig {
+    /// Node ID assigned during registration
+    pub node_id: String,
+
+    /// Human-readable node name
+    pub name: String,
+
+    /// Node token (nxs_node_*) — kept for backward compatibility.
+    /// New configs use [api.tokens.telemetry].token instead.
+    /// On save, this field is kept in sync with api.tokens.telemetry.token.
+    pub token: String,
+
+    /// Optional tags for categorization
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
+// [compose]
+// ---------------------------------------------------------------------------
+
+/// Configuration for Docker Compose management and C&C channel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposeConfig {
     /// Directory containing docker-compose.yaml and related config files.
@@ -35,35 +160,21 @@ pub struct ComposeConfig {
     pub dir: PathBuf,
 
     /// Extra file extensions to expose alongside the compose file.
-    /// Default: [".env", ".conf", ".toml"]
     #[serde(default = "default_compose_extra_extensions")]
     pub extra_extensions: Vec<String>,
 
     /// C&C channel token (nxs_cmd_*).
-    /// Required for all /api/compose/* routes. If absent the endpoint
-    /// returns 403 Forbidden.
+    /// Kept for backward compatibility — new configs use [api.tokens.command].token.
     #[serde(default)]
     pub cmd_token: Option<String>,
 
-    /// Ed25519 public key used to verify signed commands from the Nexus backend.
-    /// Base64url-encoded 32-byte verifying key. Also written to
-    /// ~/.nexus-link/signing_key.pub at registration time.
-    /// If absent, signature verification is skipped (warning logged).
+    /// Ed25519 public key (base64url, 32 bytes) for signed command verification.
     #[serde(default)]
     pub signing_public_key: Option<String>,
 
-    /// When true, write operations (PUT /api/compose/file, POST
-    /// /api/compose/activate) require a valid X-Nexus-Signature header.
-    /// Default: false (v1 — set to true once backend signing is deployed).
+    /// Enforce Ed25519 signatures on write operations (default: false).
     #[serde(default)]
     pub require_signatures: bool,
-
-    /// How often (in seconds) the command queue is polled from the Nexus backend.
-    /// Independent of the telemetry push interval.
-    /// Default: 2 — fast enough for responsive UI without excessive load.
-    /// Only active when cmd_token is configured.
-    #[serde(default = "default_command_poll_secs")]
-    pub command_poll_secs: u64,
 }
 
 impl Default for ComposeConfig {
@@ -74,36 +185,13 @@ impl Default for ComposeConfig {
             cmd_token: None,
             signing_public_key: None,
             require_signatures: false,
-            command_poll_secs: default_command_poll_secs(),
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NodeConfig {
-    /// Node ID assigned during registration
-    pub node_id: String,
-
-    /// Human-readable node name
-    pub name: String,
-
-    /// Node token (nxs_node_*)
-    pub token: String,
-
-    /// Optional tags for categorization
-    #[serde(default)]
-    pub tags: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApiConfig {
-    /// Nexus backend base URL
-    pub base_url: String,
-
-    /// Telemetry push interval in seconds
-    #[serde(default = "default_push_interval")]
-    pub push_interval_secs: u64,
-}
+// ---------------------------------------------------------------------------
+// [service]
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceConfig {
@@ -125,6 +213,10 @@ impl Default for ServiceConfig {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Config impl
+// ---------------------------------------------------------------------------
+
 impl Config {
     /// Load config from default path
     pub fn load() -> anyhow::Result<Self> {
@@ -135,7 +227,8 @@ impl Config {
     pub fn load_from(path: PathBuf) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(&path)
             .map_err(|e| anyhow::anyhow!("Failed to read config at {}: {}", path.display(), e))?;
-        let config: Config = toml::from_str(&content)?;
+        let mut config: Config = toml::from_str(&content)?;
+        config.migrate_legacy_fields();
         Ok(config)
     }
 
@@ -153,10 +246,76 @@ impl Config {
         std::fs::write(&path, content)?;
         Ok(())
     }
+
+    /// Migrate fields from old config layout to new layout.
+    ///
+    /// Old layout:                         New layout:
+    ///   [api]                               [api.tokens]
+    ///   push_interval_secs = 10             telemetry = { token = "...", scope = "read" }
+    ///   [node]                              command   = { token = "...", scope = "read_write" }
+    ///   token = "nxs_node_..."              [agent]
+    ///   [compose]                           push_sec = 6
+    ///   cmd_token = "nxs_cmd_..."           poll_sec = 2
+    fn migrate_legacy_fields(&mut self) {
+        // api.push_interval_secs → agent.push_sec
+        if let Some(old_interval) = self.api.push_interval_secs.take()
+            && self.agent.push_sec == default_push_sec()
+        {
+            self.agent.push_sec = old_interval;
+        }
+
+        // node.token → api.tokens.telemetry.token (if not already set)
+        if self.api.tokens.telemetry.is_none() && !self.node.token.is_empty() {
+            self.api.tokens.telemetry = Some(TokenEntry {
+                token: self.node.token.clone(),
+                scope: "read".to_string(),
+            });
+        }
+
+        // compose.cmd_token → api.tokens.command.token (if not already set)
+        if self.api.tokens.command.is_none()
+            && let Some(ref cmd) = self.compose.cmd_token.clone()
+        {
+            self.api.tokens.command = Some(TokenEntry {
+                token: cmd.clone(),
+                scope: "read_write".to_string(),
+            });
+        }
+    }
+
+    /// Convenience: return the effective node token
+    /// (new location: api.tokens.telemetry.token, fallback: node.token)
+    pub fn node_token(&self) -> &str {
+        self.api
+            .tokens
+            .telemetry
+            .as_ref()
+            .map(|t| t.token.as_str())
+            .unwrap_or(&self.node.token)
+    }
+
+    /// Convenience: return the effective cmd token
+    /// (new location: api.tokens.command.token, fallback: compose.cmd_token)
+    pub fn cmd_token(&self) -> Option<&str> {
+        self.api
+            .tokens
+            .command
+            .as_ref()
+            .map(|t| t.token.as_str())
+            .or(self.compose.cmd_token.as_deref())
+    }
 }
 
-fn default_push_interval() -> u64 {
+// ---------------------------------------------------------------------------
+// Default value functions
+// ---------------------------------------------------------------------------
+
+fn default_push_sec() -> u64 {
     6
+}
+
+fn default_poll_sec() -> u64 {
+    2
 }
 
 fn default_listen_addr() -> String {
@@ -173,8 +332,4 @@ fn default_compose_dir() -> PathBuf {
 
 fn default_compose_extra_extensions() -> Vec<String> {
     vec![".env".into(), ".conf".into(), ".toml".into()]
-}
-
-fn default_command_poll_secs() -> u64 {
-    2
 }

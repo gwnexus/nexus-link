@@ -22,12 +22,12 @@ async fn main() -> anyhow::Result<()> {
     info!("nexus-link-agent starting...");
 
     let config = Config::load()?;
-    let interval = Duration::from_secs(config.api.push_interval_secs);
+    let interval = Duration::from_secs(config.agent.push_sec);
 
     info!(
         node_id = %config.node.node_id,
         api_url = %config.api.base_url,
-        interval_secs = config.api.push_interval_secs,
+        push_sec = config.agent.push_sec,
         "Agent configured"
     );
 

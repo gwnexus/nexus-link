@@ -5,7 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.3] - 2026-06-25
+## [0.8.4] - 2026-06-25
+
+### Changed
+
+- **Config restructure: `[api.tokens]` + `[agent]`** — the two token
+  credentials and the two timing intervals now live in dedicated sections:
+
+  ```toml
+  [api]
+  base_url = "https://nexus.gatewarden.eu"
+
+  [api.tokens]
+  telemetry = { token = "nxs_node_...", scope = "read" }
+  command   = { token = "nxs_cmd_...",  scope = "read_write" }
+
+  [agent]
+  push_sec = 6    # telemetry push interval (nexus-link-agent)
+  poll_sec = 2    # command queue poll interval (nexus-link-service)
+  ```
+
+  **Backward compatibility:** old `config.toml` files are migrated
+  transparently on first load — `api.push_interval_secs` → `agent.push_sec`,
+  `node.token` → `api.tokens.telemetry`, `compose.cmd_token` →
+  `api.tokens.command`. No manual action required on existing nodes.
+
+- Default telemetry push interval corrected: **6 seconds** (was hardcoded
+  to 10 at registration time despite the Serde default being 6).
+- Default command poll interval: **2 seconds** (unchanged).
+- `nexus-link config show` now displays `[api.tokens]` and `[agent]` sections.
+- `nexus-link config set/get` supports new keys:
+  `agent.push_sec`, `agent.poll_sec`, `api.tokens.telemetry`,
+  `api.tokens.command`. Old aliases (`push_interval`, `interval`) still work.
+- `nexus-link status` shows `<push>s push / <poll>s poll` instead of a
+  single interval value.
+- `nexus-link refresh --token` keeps `api.tokens.telemetry.token` in sync
+  with `node.token` on rotation.
+- New convenience methods on `Config`: `node_token()` and `cmd_token()` —
+  resolve the effective token from the new location with fallback to the
+  legacy fields.
+
+
 
 ### Fixed
 - `nexus-link config set compose.signing_public_key` was rejected with

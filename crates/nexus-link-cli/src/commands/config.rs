@@ -1,4 +1,4 @@
-use nexus_link_core::config::{self, Config, dirs_home};
+use nexus_link_core::config::{self, Config, TokenEntry, dirs_home};
 
 pub async fn show() -> anyhow::Result<()> {
     let config_path = config::default_config_path();
@@ -29,7 +29,28 @@ pub async fn show() -> anyhow::Result<()> {
     println!();
     println!("  [api]");
     println!("  base_url         = {}", config.api.base_url);
-    println!("  push_interval    = {}s", config.api.push_interval_secs);
+    println!();
+    println!("  [api.tokens]");
+    match &config.api.tokens.telemetry {
+        Some(t) => println!(
+            "  telemetry        = {{ token = {}..., scope = \"{}\" }}",
+            &t.token[..20.min(t.token.len())],
+            t.scope
+        ),
+        None => println!("  telemetry        = (not configured)"),
+    }
+    match &config.api.tokens.command {
+        Some(t) => println!(
+            "  command          = {{ token = {}..., scope = \"{}\" }}",
+            &t.token[..20.min(t.token.len())],
+            t.scope
+        ),
+        None => println!("  command          = (not configured)"),
+    }
+    println!();
+    println!("  [agent]");
+    println!("  push_sec         = {}", config.agent.push_sec);
+    println!("  poll_sec         = {}", config.agent.poll_sec);
     println!();
     println!("  [service]");
     println!("  listen_addr      = {}", config.service.listen_addr);
@@ -65,15 +86,53 @@ pub async fn set(key: String, value: String) -> anyhow::Result<()> {
             config.api.base_url = value.clone();
             println!("  api.base_url = {}", value);
         }
-        "api.push_interval_secs" | "push_interval" | "interval" => {
+        "agent.push_sec" | "api.push_interval_secs" | "push_interval" | "interval" => {
             let secs: u64 = value
                 .parse()
                 .map_err(|_| anyhow::anyhow!("Invalid value: expected integer (seconds)"))?;
-            if secs < 5 {
-                anyhow::bail!("Push interval must be at least 5 seconds");
+            if secs < 1 {
+                anyhow::bail!("Push interval must be at least 1 second");
             }
-            config.api.push_interval_secs = secs;
-            println!("  api.push_interval_secs = {}", secs);
+            config.agent.push_sec = secs;
+            println!("  agent.push_sec = {}", secs);
+        }
+        "agent.poll_sec" | "poll_sec" => {
+            let secs: u64 = value
+                .parse()
+                .map_err(|_| anyhow::anyhow!("Invalid value: expected integer (seconds)"))?;
+            if secs < 1 {
+                anyhow::bail!("Poll interval must be at least 1 second");
+            }
+            config.agent.poll_sec = secs;
+            println!("  agent.poll_sec = {}", secs);
+        }
+        "api.tokens.telemetry" | "telemetry_token" => {
+            config.api.tokens.telemetry = if value.is_empty() {
+                None
+            } else {
+                Some(TokenEntry {
+                    token: value.clone(),
+                    scope: "read".to_string(),
+                })
+            };
+            // Keep node.token in sync
+            if let Some(ref t) = config.api.tokens.telemetry {
+                config.node.token = t.token.clone();
+            }
+            println!("  api.tokens.telemetry updated");
+        }
+        "api.tokens.command" | "command_token" => {
+            config.api.tokens.command = if value.is_empty() {
+                None
+            } else {
+                Some(TokenEntry {
+                    token: value.clone(),
+                    scope: "read_write".to_string(),
+                })
+            };
+            // Keep compose.cmd_token in sync for backward compat
+            config.compose.cmd_token = config.api.tokens.command.as_ref().map(|t| t.token.clone());
+            println!("  api.tokens.command updated");
         }
         "service.listen_addr" | "listen_addr" => {
             config.service.listen_addr = value.clone();
@@ -139,7 +198,9 @@ pub async fn set(key: String, value: String) -> anyhow::Result<()> {
         _ => {
             anyhow::bail!(
                 "Unknown config key: '{}'\n\nAvailable keys:\n  \
-                 api_url, push_interval, listen_addr, port, name, tags,\n  \
+                 api_url, agent.push_sec, agent.poll_sec,\n  \
+                 api.tokens.telemetry, api.tokens.command,\n  \
+                 listen_addr, port, name, tags,\n  \
                  compose_dir, compose.cmd_token, compose.signing_public_key,\n  \
                  compose.require_signatures",
                 key
@@ -158,9 +219,24 @@ pub async fn get(key: String) -> anyhow::Result<()> {
 
     let value = match key.as_str() {
         "api.base_url" | "api_url" => config.api.base_url,
-        "api.push_interval_secs" | "push_interval" | "interval" => {
-            config.api.push_interval_secs.to_string()
+        "agent.push_sec" | "api.push_interval_secs" | "push_interval" | "interval" => {
+            config.agent.push_sec.to_string()
         }
+        "agent.poll_sec" | "poll_sec" => config.agent.poll_sec.to_string(),
+        "api.tokens.telemetry" | "telemetry_token" => config
+            .api
+            .tokens
+            .telemetry
+            .as_ref()
+            .map(|t| t.token.clone())
+            .unwrap_or_else(|| "(not configured)".to_string()),
+        "api.tokens.command" | "command_token" => config
+            .api
+            .tokens
+            .command
+            .as_ref()
+            .map(|t| t.token.clone())
+            .unwrap_or_else(|| "(not configured)".to_string()),
         "service.listen_addr" | "listen_addr" => config.service.listen_addr,
         "service.port" | "port" => config.service.port.to_string(),
         "node.name" | "name" => config.node.name,
@@ -182,7 +258,9 @@ pub async fn get(key: String) -> anyhow::Result<()> {
         _ => {
             anyhow::bail!(
                 "Unknown config key: '{}'\n\nAvailable keys:\n  \
-                 api_url, push_interval, listen_addr, port, name, node_id, tags, token,\n  \
+                 api_url, agent.push_sec, agent.poll_sec,\n  \
+                 api.tokens.telemetry, api.tokens.command,\n  \
+                 listen_addr, port, name, node_id, tags, token,\n  \
                  compose_dir, compose.cmd_token, compose.signing_public_key,\n  \
                  compose.require_signatures",
                 key

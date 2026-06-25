@@ -18,8 +18,16 @@ pub async fn execute(token: String) -> anyhow::Result<()> {
 
     println!("Refreshing token for node '{}'...", config.node.name);
 
-    // Replace with new token
+    // Replace with new token — keep both locations in sync
     config.node.token = token.clone();
+    if let Some(ref mut t) = config.api.tokens.telemetry {
+        t.token = token.clone();
+    } else {
+        config.api.tokens.telemetry = Some(nexus_link_core::config::TokenEntry {
+            token: token.clone(),
+            scope: "read".to_string(),
+        });
+    }
 
     // Attempt heartbeat with the new token
     info!("Sending heartbeat with new token...");
