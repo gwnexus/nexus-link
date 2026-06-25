@@ -94,7 +94,7 @@ jobs:
   release:
     name: GitHub Release
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: [build-binaries]
+    needs: [build-binaries, build-container]
     permissions:
       contents: write
 
