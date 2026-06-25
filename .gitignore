@@ -40,5 +40,9 @@ coverage/
 # OpenCode local state
 .opencode/sessions/
 
+# OpenCode configuration (may contain PAT tokens)
+opencode.json
+opencode.json.bkp
+
 # Nexus platform logs (local only)
 .nexus/*.log

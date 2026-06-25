@@ -297,6 +297,20 @@ async fn execute_logs_snapshot(
         tail,
     ];
     if let Some(svc) = service {
+        // SEC-003: Validate service name — reject flag-like values and special chars
+        // to prevent argument injection into docker compose logs.
+        let valid = !svc.is_empty()
+            && !svc.starts_with('-')
+            && svc
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_');
+        if !valid {
+            return ComposeCommandResult {
+                status: ComposeCommandStatus::Failed,
+                result: None,
+                error: Some(format!("Invalid service name: '{}'", svc)),
+            };
+        }
         args.push(svc.to_string());
     }
 

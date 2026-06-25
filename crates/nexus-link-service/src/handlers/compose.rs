@@ -104,6 +104,14 @@ fn read_extra_files(dir: &Path, extensions: &[String]) -> Vec<ComposeFileEntry> 
         if !path.is_file() {
             continue;
         }
+        // SEC-004: Ensure the resolved path stays within the compose directory.
+        // Symlinks that escape the directory are rejected.
+        if let Ok(canonical) = path.canonicalize()
+            && let Ok(dir_canonical) = dir.canonicalize()
+            && !canonical.starts_with(&dir_canonical)
+        {
+            continue;
+        }
         let name = path
             .file_name()
             .and_then(|n| n.to_str())
