@@ -65,12 +65,26 @@ pub async fn execute(
         anyhow::bail!("Invalid cmd-token format. Expected: nxs_cmd_<...>");
     }
 
+    // Detect private IP — used as the service endpoint when no public DNS is available.
+    // For nodes behind WireGuard / LAN-only setups this is the only reachable address.
+    let private_ip = nexus_link_core::network::detect_private_ip();
+    let public_endpoint = private_ip.as_deref().map(|ip| {
+        nexus_link_core::network::format_service_endpoint(ip, 8443)
+    });
+
+    if let Some(ref ep) = public_endpoint {
+        println!("  Detected private IP → service endpoint: {}", ep);
+    } else {
+        println!("  Warning: could not detect private IP. public_endpoint will be unset.");
+    }
+
     let client = reqwest::Client::new();
     let register_req = RegisterRequest {
         name: node_name.clone(),
-        private_ip: None, // TODO: detect local IP
+        private_ip: private_ip.clone(),
         tags: tags.clone(),
         description: Some(format!("Registered via nexus-link CLI from {}", hostname)),
+        public_endpoint,
     };
 
     let resp = client

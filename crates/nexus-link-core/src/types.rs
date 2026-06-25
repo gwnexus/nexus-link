@@ -51,9 +51,15 @@ pub struct CommandResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterRequest {
     pub name: String,
+    /// Detected private IP address (e.g. 10.0.10.121)
     pub private_ip: Option<String>,
     pub tags: Vec<String>,
     pub description: Option<String>,
+    /// Service endpoint derived from private IP (e.g. 10.0.10.121:8443).
+    /// Used as public_endpoint when none is already set on the node record.
+    /// For WireGuard/LAN-only deployments this is the only reachable address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_endpoint: Option<String>,
 }
 
 /// Node registration response from backend

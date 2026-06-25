@@ -316,42 +316,9 @@ pub fn parse_nvidia_smi_output(output: &str) -> Vec<GpuDevice> {
     devices
 }
 
-/// Detect the primary private IP address of this machine
+/// Re-export from core — collector uses the same IP detection logic
 fn detect_private_ip() -> Option<String> {
-    // Strategy: parse `ip route get 1.1.1.1` to find the source IP
-    // This gives us the IP that would be used for outbound traffic
-    let output = std::process::Command::new("ip")
-        .args(["route", "get", "1.1.1.1"])
-        .output();
-
-    if let Ok(o) = output
-        && o.status.success()
-    {
-        let stdout = String::from_utf8_lossy(&o.stdout);
-        // Output looks like: "1.1.1.1 via 10.0.0.1 dev eth0 src 10.0.0.50 uid 1000"
-        if let Some(src_idx) = stdout.find("src ") {
-            let after_src = &stdout[src_idx + 4..];
-            let ip = after_src.split_whitespace().next().unwrap_or("");
-            if !ip.is_empty() {
-                return Some(ip.to_string());
-            }
-        }
-    }
-
-    // Fallback: parse `hostname -I` (first IP)
-    let output = std::process::Command::new("hostname").arg("-I").output();
-
-    if let Ok(o) = output
-        && o.status.success()
-    {
-        let stdout = String::from_utf8_lossy(&o.stdout);
-        let first_ip = stdout.split_whitespace().next().unwrap_or("");
-        if !first_ip.is_empty() {
-            return Some(first_ip.to_string());
-        }
-    }
-
-    None
+    nexus_link_core::network::detect_private_ip()
 }
 
 #[cfg(test)]

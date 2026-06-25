@@ -95,12 +95,14 @@ fn test_register_request_serialization() {
         private_ip: Some("10.0.0.50".to_string()),
         tags: vec!["gpu".to_string(), "aarch64".to_string()],
         description: Some("DGX Spark node".to_string()),
+        public_endpoint: Some("10.0.0.50:8443".to_string()),
     };
 
     let json = serde_json::to_string(&req).unwrap();
     assert!(json.contains("dgx-spark"));
     assert!(json.contains("10.0.0.50"));
     assert!(json.contains("gpu"));
+    assert!(json.contains("10.0.0.50:8443"));
 }
 
 #[test]
