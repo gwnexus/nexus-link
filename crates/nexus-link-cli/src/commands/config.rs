@@ -1,4 +1,4 @@
-use nexus_link_core::config::{self, Config};
+use nexus_link_core::config::{self, Config, dirs_home};
 
 pub async fn show() -> anyhow::Result<()> {
     let config_path = config::default_config_path();
@@ -116,11 +116,32 @@ pub async fn set(key: String, value: String) -> anyhow::Result<()> {
             config.compose.require_signatures = v;
             println!("  compose.require_signatures = {}", v);
         }
+        "compose.signing_public_key" | "signing_public_key" => {
+            let key_path = dirs_home().join("signing_key.pub");
+            if value.is_empty() {
+                config.compose.signing_public_key = None;
+                let _ = std::fs::remove_file(&key_path);
+                println!("  compose.signing_public_key cleared");
+            } else {
+                // Write to signing_key.pub so the service picks it up at next start
+                if let Some(parent) = key_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&key_path, &value)?;
+                config.compose.signing_public_key = Some(value.clone());
+                println!(
+                    "  compose.signing_public_key = {}...",
+                    &value[..20.min(value.len())]
+                );
+                println!("  signing_key.pub written to: {}", key_path.display());
+            }
+        }
         _ => {
             anyhow::bail!(
                 "Unknown config key: '{}'\n\nAvailable keys:\n  \
                  api_url, push_interval, listen_addr, port, name, tags,\n  \
-                 compose_dir, compose.cmd_token, compose.require_signatures",
+                 compose_dir, compose.cmd_token, compose.signing_public_key,\n  \
+                 compose.require_signatures",
                 key
             );
         }
@@ -154,11 +175,16 @@ pub async fn get(key: String) -> anyhow::Result<()> {
         "compose.require_signatures" | "require_signatures" => {
             config.compose.require_signatures.to_string()
         }
+        "compose.signing_public_key" | "signing_public_key" => config
+            .compose
+            .signing_public_key
+            .unwrap_or_else(|| "(not configured)".to_string()),
         _ => {
             anyhow::bail!(
                 "Unknown config key: '{}'\n\nAvailable keys:\n  \
                  api_url, push_interval, listen_addr, port, name, node_id, tags, token,\n  \
-                 compose_dir, compose.cmd_token, compose.require_signatures",
+                 compose_dir, compose.cmd_token, compose.signing_public_key,\n  \
+                 compose.require_signatures",
                 key
             );
         }

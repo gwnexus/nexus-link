@@ -5,6 +5,137 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] - 2026-06-25
+
+### Fixed
+- `nexus-link config set compose.signing_public_key` was rejected with
+  "Unknown config key" — the key was missing from the `set` and `get`
+  dispatch tables in `config.rs`.
+  Now writes `compose.signing_public_key` to `config.toml` **and**
+  simultaneously writes `~/.nexus-link/signing_key.pub` so
+  `nexus-link-service` picks up the key at its next start without
+  requiring a re-registration.
+
+### Added
+- `nexus-link config set compose.signing_public_key <base64url>` — sets
+  the Ed25519 verifying key used for signed compose commands (ADR-0051 v2).
+  Passing an empty string clears the key and removes `signing_key.pub`.
+- `nexus-link config get compose.signing_public_key` — reads the configured
+  verifying key.
+
+## [0.8.2] - 2026-06-25
+
+### Added
+- Multi-architecture container image (`linux/arm64` + `linux/amd64`).
+  Both platforms are built in the release pipeline and assembled into a
+  single multi-arch manifest via `docker buildx imagetools create`.
+  `docker pull ghcr.io/gwnexus/nexus-link/nexus-link-service` now
+  automatically selects the correct platform on ARM and x86\_64 nodes.
+- New `docker/Dockerfile.release`: minimal runtime image that copies the
+  pre-built cross-compiled binary into `debian:bookworm-slim`. No compiler,
+  no QEMU emulation — container build time reduced from ~12 min to ~60-90s.
+- Cargo registry cache (`useblacksmith/cache@v5`) in the release pipeline
+  saves 60-90s on warm runs by skipping dependency recompilation.
+- Manifest tags `<version>`, `<major.minor>`, and `latest` published after
+  every release.
+
+### Fixed
+- Release job now correctly waits for the multi-arch manifest before
+  creating the GitHub Release (`needs: [build-binaries, publish-manifest]`).
+  Previously the container build was not a release gate.
+- Contact emails updated to `post+*@gatewarden.eu` across `Cargo.toml`,
+  `AUTHORS.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, and GitHub templates.
+
+### Changed
+- Release pipeline restructured into four sequential jobs:
+  `build-binaries` → `build-container` (matrix) → `publish-manifest` → `release`.
+- `pre-commit` hooks now active: `cargo fmt`, `cargo check`, `cargo clippy`,
+  plus file-hygiene hooks (trailing whitespace, EOF, YAML/TOML syntax).
+- `rustfmt.toml` added (`edition = "2024"`) to prevent formatter divergence
+  between local and CI toolchain versions.
+
+## [0.8.1] - 2026-06-25
+
+### Added
+- `nexus-link reset [--force]`: hard-reset command for post-dashboard-delete
+  cleanup. Stops and disables `nexus-link-agent` and `nexus-link-service`
+  via systemd (user mode → system mode → pkill fallback), then removes the
+  entire `~/.nexus-link/` directory. Docker containers and compose files are
+  not affected. Interactive confirmation unless `--force` is passed.
+
+### Changed
+- Integration test workflow temporarily set to `workflow_dispatch` only
+  (re-enabled after DGX Spark E2E test — tracked in Nexus task
+  `90d82c80-838f-43aa-8279-2bc43c075864`).
+
+## [0.8.0] - 2026-06-25
+
+### Added
+- **Compose Management API** (`nexus-link-service`, port 8443):
+  - `GET /api/compose/file` — reads `docker-compose.yaml` and companion
+    config files (`.env`, `.conf`, `.toml`) from the configured compose root
+    (default `/opt/dgx-llm`).
+  - `PUT /api/compose/file` — writes compose file with YAML validation and
+    atomic write (tmp → rename). Commits to git if the directory is a repo.
+  - `POST /api/compose/activate` — runs `docker compose up -d`
+    (120-second timeout, returns stdout + stderr).
+  - `GET /api/compose/logs` — SSE live log stream via
+    `docker compose logs --follow`.
+- **Two-token security model** (ADR-0051 v1 + v2):
+  - Dedicated `nxs_cmd_*` command token for all `/api/compose/*` routes,
+    separate from the telemetry `nxs_node_*` token.
+  - New `require_cmd_auth` middleware: `403 Forbidden` when `cmd_token`
+    is not configured; `401 Unauthorized` on wrong token.
+  - `cmd_auth` middleware stores the token hash on every request (no
+    in-memory cache) so `nexus-link config set compose.cmd_token` takes
+    effect immediately without a service restart.
+  - Ed25519 signed command verification for write operations when
+    `compose.require_signatures = true` (opt-in, default false).
+    Canonical message: `METHOD\nPATH\nTIMESTAMP\nNONCE\nSHA256(body)`.
+    ±5-minute replay window. Body is buffered and re-injected after
+    verification.
+  - `AppState.signing_pubkey` loaded from `~/.nexus-link/signing_key.pub`
+    (primary) or `config.compose.signing_public_key` (fallback) at startup.
+  - `ed25519-dalek v2` + `hex` added to workspace dependencies.
+- `nexus-link register --cmd-token <nxs_cmd_*>`: registers both tokens in a
+  single step. Writes `signing_public_key` from the register response to
+  `config.toml` and `~/.nexus-link/signing_key.pub`.
+- `nexus-link refresh-cmd --cmd-token <nxs_cmd_*>`: applies a rotated
+  command token. Takes effect immediately — no service restart required.
+  (Backend invalidates old token atomically, no grace period.)
+- `nexus-link config set/get` support for `compose.cmd_token` and
+  `compose.require_signatures`.
+- `ComposeConfig` extended with `cmd_token`, `signing_public_key`, and
+  `require_signatures` fields in `nexus-link-core`.
+
+### Fixed
+- `require_auth` middleware now performs real SHA-256 hash comparison against
+  the stored node token hash. Previously any well-formed `nxs_node_*` token
+  was accepted without verification.
+- `AppState` no longer suppresses `dead_code` warnings on `config` and
+  `docker` fields — both are now actively used.
+
+### Changed
+- Router split into `public_routes()` (health, no auth) and
+  `protected_routes()` (commands, node auth) + `compose_routes()` (cmd auth).
+  Auth middleware applied via `from_fn_with_state` in `main.rs` with full
+  access to `SharedState` for token verification.
+- `ServiceConfig.compose_root` superseded by `ComposeConfig.dir` (existing
+  deployments unaffected — field is `#[serde(default)]`).
+
+## [0.7.5] - 2026-06-21
+
+### Fixed
+- Private IP detection now uses `ip route get 1.1.1.1` with `hostname -I`
+  fallback. Reports detected endpoint during registration.
+- DGX Spark unified memory workaround: when `nvidia-smi` reports `[N/A]`
+  for `memory.total`/`memory.used` (Grace Blackwell unified architecture),
+  falls back to `/proc/meminfo` for total and per-process VRAM sum for used.
+  Hardcoded fallback: 128 GB total for DGX Spark.
+- Telemetry push logging: structured `info!` log after each successful push
+  with CPU%, memory GB, container count, GPU summary, and private IP.
+- Default push interval changed from 30s to 10s.
+
 ## [0.7.4] - 2026-06-21
 
 ### Added
