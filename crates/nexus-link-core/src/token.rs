@@ -52,7 +52,13 @@ pub fn hash_token(token: &str) -> String {
     hex::encode(result)
 }
 
-/// Verify a token against a stored hash (constant-time via string equality).
+/// Verify a token against a stored hash.
+///
+/// Note: We compare SHA-256 hex digests using standard equality. This is NOT
+/// constant-time, but timing attacks on hash comparisons are not practically
+/// exploitable when the input is a 64-char hex string (network jitter dominates).
+/// The security property comes from the pre-image resistance of SHA-256, not
+/// from constant-time comparison of the hashes.
 pub fn verify_token(token: &str, stored_hash: &str) -> bool {
     hash_token(token) == stored_hash
 }

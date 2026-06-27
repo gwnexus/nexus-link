@@ -254,7 +254,7 @@ pub async fn get_compose_file(
     let compose_path = find_compose_file(compose_dir).ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
-            format!("No docker-compose.yaml found in {}", compose_dir.display()),
+            "No docker-compose.yaml found in configured compose directory".to_string(),
         )
     })?;
 
@@ -428,6 +428,23 @@ pub async fn stream_compose_logs(
     ];
 
     if let Some(service) = &params.service {
+        // SEC-002: Validate service name — reject flag-like values and special chars
+        // to prevent argument injection into docker compose logs (same logic as poller.rs).
+        let valid = !service.is_empty()
+            && !service.starts_with('-')
+            && service
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_');
+        if !valid {
+            let err_msg = format!("error: invalid service name: '{}'", service);
+            return axum::response::sse::Sse::new(async_stream::stream! {
+                yield Ok::<Event, std::convert::Infallible>(
+                    Event::default().data(err_msg)
+                );
+            })
+            .keep_alive(KeepAlive::default())
+            .into_response();
+        }
         args.push(service.clone());
     }
 
@@ -479,7 +496,9 @@ pub async fn stream_compose_logs(
         }
     };
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 // ---------------------------------------------------------------------------
