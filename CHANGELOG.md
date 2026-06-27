@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.7] - 2026-06-27
+
+### Changed
+
+- CLI header updated to match Nexus CLI style:
+  `Nexus Link v<version> — Nexus hardware node agent`
+  `(C) 2025-present RelicFrog Holding UG | Nexus Product Group`
+
+## [0.8.6] - 2026-06-26
+
+### Fixed
+
+- **Security (MEDIUM):** Added service name validation to `stream_compose_logs`
+  SSE handler — rejects names starting with `-` or containing special characters
+  (`/`, `;`, `&`, `|`, ` `). Mirrors existing validation in `poller.rs`.
+- **Security (MEDIUM):** Removed misleading "constant-time" claim from
+  `verify_token` doc comment in `token.rs`. The actual security property
+  (SHA-256 pre-image resistance) is now documented correctly.
+- **Security (LOW):** Removed internal filesystem path from 404 error
+  response in `get_compose_file` handler — now returns a generic message.
+
 ## [0.8.5] - 2026-06-25
 
 ### Added

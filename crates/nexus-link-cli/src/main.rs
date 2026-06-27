@@ -9,7 +9,13 @@ mod commands;
     about = concat!(
         "Nexus Link v",
         env!("CARGO_PKG_VERSION"),
-        " — Nexus platform hardware agent\n",
+        " — Nexus hardware node agent\n",
+        "(C) 2025-present RelicFrog Holding UG | Nexus Product Group"
+    ),
+    long_about = concat!(
+        "Nexus Link v",
+        env!("CARGO_PKG_VERSION"),
+        " — Nexus hardware node agent\n",
         "(C) 2025-present RelicFrog Holding UG | Nexus Product Group"
     ),
     version
