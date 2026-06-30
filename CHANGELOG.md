@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.8] - 2026-06-30
+
+### Added
+
+- **Command queue:** `validate_yaml` command type — dry-run YAML validation
+  using the same `serde_yaml` parser as `put_file`. Returns `valid: true/false`
+  without writing any file. Requested by nexus-app for Compose editor UX.
+
+### Fixed
+
+- **Security (HIGH):** Added 2 MiB `DefaultBodyLimit` layer to the axum router
+  to prevent memory exhaustion via oversized request payloads.
+- **Security (HIGH):** Default `listen_addr` changed from `0.0.0.0` to
+  `127.0.0.1`. Existing configs with explicit `listen_addr = "0.0.0.0"` are
+  unaffected. New deployments require explicit opt-in for public binding.
+- **Security (MEDIUM):** Removed filesystem paths from client-facing error
+  responses in compose handlers. Full errors are still logged server-side.
+- **Security (MEDIUM):** Clamped `tail` query parameter in the SSE log stream
+  to a maximum of 10,000 lines to prevent OOM from unbounded log reads.
+
+### Changed
+
+- **CI:** Re-enabled integration test workflow on push/PR to `main` (was
+  disabled during v0.8.0 E2E verification cycle).
+
 ## [0.8.7] - 2026-06-27
 
 ### Changed

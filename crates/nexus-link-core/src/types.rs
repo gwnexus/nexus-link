@@ -78,6 +78,7 @@ pub enum ComposeCommandType {
     PutFile,
     Activate,
     GetLogsSnapshot,
+    ValidateYaml,
 }
 
 /// A pending command item returned by GET .../compose/commands/pending

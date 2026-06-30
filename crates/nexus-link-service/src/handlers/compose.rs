@@ -259,10 +259,10 @@ pub async fn get_compose_file(
     })?;
 
     let content = std::fs::read_to_string(&compose_path).map_err(|e| {
-        error!("Failed to read compose file: {}", e);
+        error!("Failed to read compose file {}: {}", compose_path.display(), e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to read compose file: {}", e),
+            "Failed to read compose file".to_string(),
         )
     })?;
 
@@ -275,7 +275,11 @@ pub async fn get_compose_file(
     );
 
     Ok(Json(GetComposeFileResponse {
-        path: compose_path.to_string_lossy().to_string(),
+        path: compose_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("docker-compose.yaml")
+            .to_string(),
         content,
         files: extra_files,
     }))
@@ -301,9 +305,10 @@ pub async fn put_compose_file(
 
     // Ensure directory exists
     std::fs::create_dir_all(compose_dir).map_err(|e| {
+        error!("Cannot create compose directory: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Cannot create compose directory: {}", e),
+            "Cannot create compose directory".to_string(),
         )
     })?;
 
@@ -315,7 +320,7 @@ pub async fn put_compose_file(
         error!("Failed to write tmp compose file: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to write file: {}", e),
+            "Failed to write file".to_string(),
         )
     })?;
 
@@ -324,7 +329,7 @@ pub async fn put_compose_file(
         let _ = std::fs::remove_file(&tmp_path);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to commit file write: {}", e),
+            "Failed to commit file write".to_string(),
         )
     })?;
 
@@ -339,7 +344,7 @@ pub async fn put_compose_file(
     };
 
     Ok(Json(PutComposeFileResponse {
-        path: compose_path.to_string_lossy().to_string(),
+        path: "docker-compose.yaml".to_string(),
         committed,
         commit_sha,
     }))
@@ -416,7 +421,7 @@ pub async fn stream_compose_logs(
     Query(params): Query<LogsQuery>,
 ) -> impl IntoResponse {
     let compose_dir = state.config.compose.dir.clone();
-    let tail = params.tail.to_string();
+    let tail = params.tail.min(10_000).to_string();
 
     let mut args = vec![
         "compose".to_string(),

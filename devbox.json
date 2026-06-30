@@ -1,7 +1,6 @@
 {
   "env": {
     "NODE_ENV": "development",
-    "RUSTFLAGS": "-C link-arg=-fuse-ld=mold",
     "RUSTC_WRAPPER": "sccache",
     "RUST_BACKTRACE": "1",
     "C_DBX_META_TEAM": "NEXUS-Labs",

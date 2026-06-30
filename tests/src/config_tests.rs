@@ -52,7 +52,7 @@ fn test_config_save_and_load() {
 #[test]
 fn test_config_default_service() {
     let svc = ServiceConfig::default();
-    assert_eq!(svc.listen_addr, "0.0.0.0");
+    assert_eq!(svc.listen_addr, "127.0.0.1");
     assert_eq!(svc.port, 8443);
 }
 

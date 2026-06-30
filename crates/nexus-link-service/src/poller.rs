@@ -106,6 +106,7 @@ async fn execute_command(cmd: &ComposeCommandItem, state: &Arc<AppState>) -> Com
         ComposeCommandType::PutFile => execute_put_file(cmd, state),
         ComposeCommandType::Activate => execute_activate(state).await,
         ComposeCommandType::GetLogsSnapshot => execute_logs_snapshot(cmd, state).await,
+        ComposeCommandType::ValidateYaml => execute_validate_yaml(cmd),
     }
 }
 
@@ -349,6 +350,38 @@ async fn execute_logs_snapshot(
                 error: None,
             }
         }
+    }
+}
+
+// ── ValidateYaml ────────────────────────────────────────────────────────────
+
+/// Dry-run YAML validation — parses content with the same serde_yaml parser
+/// used by `put_file`. Returns `valid: true/false` without writing any file.
+fn execute_validate_yaml(cmd: &ComposeCommandItem) -> ComposeCommandResult {
+    let content = match cmd.args.get("content").and_then(|v| v.as_str()) {
+        Some(c) => c,
+        None => {
+            return ComposeCommandResult {
+                status: ComposeCommandStatus::Completed,
+                result: Some(
+                    serde_json::json!({ "valid": false, "error": "Missing 'content' in args" }),
+                ),
+                error: None,
+            };
+        }
+    };
+
+    match serde_yaml::from_str::<serde_yaml::Value>(content) {
+        Ok(_) => ComposeCommandResult {
+            status: ComposeCommandStatus::Completed,
+            result: Some(serde_json::json!({ "valid": true })),
+            error: None,
+        },
+        Err(e) => ComposeCommandResult {
+            status: ComposeCommandStatus::Completed,
+            result: Some(serde_json::json!({ "valid": false, "error": e.to_string() })),
+            error: None,
+        },
     }
 }
 

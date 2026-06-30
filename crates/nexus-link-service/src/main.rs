@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::{Router, middleware as axum_mw};
+use axum::{Router, extract::DefaultBodyLimit, middleware as axum_mw};
 use nexus_link_core::config::Config;
 use tokio::signal;
 use tower_http::trace::TraceLayer;
@@ -84,6 +84,7 @@ async fn main() -> anyhow::Result<()> {
                 .merge(command_routes)
                 .merge(compose_routes),
         )
+        .layer(DefaultBodyLimit::max(2 * 1024 * 1024)) // 2 MiB
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

@@ -319,7 +319,7 @@ fn default_poll_sec() -> u64 {
 }
 
 fn default_listen_addr() -> String {
-    "0.0.0.0".to_string()
+    "127.0.0.1".to_string()
 }
 
 fn default_listen_port() -> u16 {
