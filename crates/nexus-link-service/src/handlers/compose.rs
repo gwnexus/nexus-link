@@ -259,7 +259,11 @@ pub async fn get_compose_file(
     })?;
 
     let content = std::fs::read_to_string(&compose_path).map_err(|e| {
-        error!("Failed to read compose file {}: {}", compose_path.display(), e);
+        error!(
+            "Failed to read compose file {}: {}",
+            compose_path.display(),
+            e
+        );
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to read compose file".to_string(),
