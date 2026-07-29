@@ -4,6 +4,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use bollard::Docker;
 use ed25519_dalek::VerifyingKey;
 use nexus_link_core::config::{Config, dirs_home};
+use nexus_link_core::token::hash_token;
 use tracing::warn;
 
 /// Shared application state for the axum service
@@ -16,16 +17,24 @@ pub struct AppState {
     /// None when no signing_key.pub is present — signature checks are
     /// skipped or rejected depending on `config.compose.require_signatures`.
     pub signing_pubkey: Option<VerifyingKey>,
+    /// Pre-computed SHA-256 hash of the node token (SEC-004).
+    pub node_token_hash: String,
+    /// Pre-computed SHA-256 hash of the cmd token (SEC-004). None if C&C not configured.
+    pub cmd_token_hash: Option<String>,
 }
 
 impl AppState {
     pub fn new(config: Config) -> anyhow::Result<Self> {
         let docker = Docker::connect_with_local_defaults()?;
         let signing_pubkey = load_signing_pubkey(&config);
+        let node_token_hash = hash_token(config.node_token());
+        let cmd_token_hash = config.cmd_token().map(hash_token);
         Ok(Self {
             config,
             docker,
             signing_pubkey,
+            node_token_hash,
+            cmd_token_hash,
         })
     }
 }

@@ -193,6 +193,18 @@ fn is_git_repo(dir: &Path) -> bool {
 
 /// Run a git add + commit for the compose file. Returns the short commit SHA.
 async fn git_commit(dir: &Path, message: &str) -> Option<String> {
+    // SEC-009: Sanitize commit message — truncate and strip control chars
+    let sanitized: String = message
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(200)
+        .collect();
+    let msg = if sanitized.is_empty() {
+        "nexus-link: compose file update"
+    } else {
+        &sanitized
+    };
+
     let add = Command::new("git")
         .args(["add", "docker-compose.yaml"])
         .current_dir(dir)
@@ -205,7 +217,7 @@ async fn git_commit(dir: &Path, message: &str) -> Option<String> {
     }
 
     let commit = Command::new("git")
-        .args(["commit", "-m", message])
+        .args(["commit", "-m", msg])
         .current_dir(dir)
         .output()
         .await;

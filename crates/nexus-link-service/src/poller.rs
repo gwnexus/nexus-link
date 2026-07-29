@@ -22,6 +22,22 @@ use tracing::{debug, error, info, warn};
 
 use crate::state::AppState;
 
+/// Maximum output length returned to the backend (SEC-008).
+const MAX_OUTPUT_LEN: usize = 8192;
+
+/// Truncate command output to prevent information disclosure (SEC-008).
+fn truncate_output(s: &str) -> String {
+    if s.len() <= MAX_OUTPUT_LEN {
+        s.to_string()
+    } else {
+        format!(
+            "{}... [truncated, {} bytes total]",
+            &s[..MAX_OUTPUT_LEN],
+            s.len()
+        )
+    }
+}
+
 /// One poll-and-execute cycle. Called on every tick of the poll interval.
 pub async fn poll_and_execute(state: &Arc<AppState>) -> anyhow::Result<()> {
     let config = &state.config;
@@ -250,8 +266,9 @@ async fn execute_activate(state: &Arc<AppState>) -> ComposeCommandResult {
         Ok(Ok(output)) => {
             let success = output.status.success();
             let exit_code = output.status.code().unwrap_or(-1);
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            // SEC-008: Truncate command output to prevent information disclosure
+            let stdout = truncate_output(&String::from_utf8_lossy(&output.stdout));
+            let stderr = truncate_output(&String::from_utf8_lossy(&output.stderr));
             ComposeCommandResult {
                 status: if success {
                     ComposeCommandStatus::Completed

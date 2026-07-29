@@ -30,9 +30,8 @@ pub async fn require_auth(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // Validate token against the stored node token via constant-time hash comparison
-    let stored_hash = nexus_link_core::token::hash_token(&state.config.node.token);
-    if !nexus_link_core::token::verify_token(token, &stored_hash) {
+    // Validate token against the pre-computed node token hash (SEC-004)
+    if !nexus_link_core::token::verify_token(token, &state.node_token_hash) {
         warn!("Token authentication failed");
         return Err(StatusCode::UNAUTHORIZED);
     }

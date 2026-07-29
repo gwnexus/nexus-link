@@ -1,6 +1,7 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::Rng;
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 const TOKEN_PREFIX: &str = "nxs_node_";
 const CMD_TOKEN_PREFIX: &str = "nxs_cmd_";
@@ -52,15 +53,13 @@ pub fn hash_token(token: &str) -> String {
     hex::encode(result)
 }
 
-/// Verify a token against a stored hash.
+/// Verify a token against a stored hash using constant-time comparison.
 ///
-/// Note: We compare SHA-256 hex digests using standard equality. This is NOT
-/// constant-time, but timing attacks on hash comparisons are not practically
-/// exploitable when the input is a 64-char hex string (network jitter dominates).
-/// The security property comes from the pre-image resistance of SHA-256, not
-/// from constant-time comparison of the hashes.
+/// Both sides are SHA-256 hex digests (64 ASCII chars). We use `subtle::ConstantTimeEq`
+/// to prevent timing side-channel attacks, especially relevant on localhost listeners.
 pub fn verify_token(token: &str, stored_hash: &str) -> bool {
-    hash_token(token) == stored_hash
+    let computed = hash_token(token);
+    computed.as_bytes().ct_eq(stored_hash.as_bytes()).into()
 }
 
 // We use hex encoding for hashes

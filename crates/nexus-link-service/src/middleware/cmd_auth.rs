@@ -9,9 +9,16 @@ use chrono::{DateTime, Duration, Utc};
 use ed25519_dalek::Verifier;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::sync::Mutex;
 use tracing::warn;
 
 use crate::state::SharedState;
+
+/// In-memory nonce replay cache (SEC-005).
+/// Maps nonce → expiry timestamp. Cleaned lazily on each check.
+static NONCE_CACHE: std::sync::LazyLock<Mutex<HashMap<String, DateTime<Utc>>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// C&C channel authentication + optional Ed25519 signature middleware.
 ///
@@ -35,11 +42,11 @@ pub async fn require_cmd_auth(
     next: Next,
 ) -> Result<Response, Response> {
     // -----------------------------------------------------------------------
-    // Gate 1a: C&C channel must be configured.
+    // Gate 1a: C&C channel must be configured (pre-computed hash present).
     //   Return 403 — the channel is simply not activated on this node yet.
     // -----------------------------------------------------------------------
-    let Some(ref stored_cmd_token) = state.config.compose.cmd_token else {
-        warn!("C&C channel not configured: compose.cmd_token is absent");
+    let Some(ref expected_hash) = state.cmd_token_hash else {
+        warn!("C&C channel not configured: no cmd token hash available");
         return Err((
             StatusCode::FORBIDDEN,
             axum::Json(json!({
@@ -71,8 +78,7 @@ pub async fn require_cmd_auth(
         return Err(StatusCode::UNAUTHORIZED.into_response());
     }
 
-    let expected_hash = nexus_link_core::token::hash_token(stored_cmd_token);
-    if !nexus_link_core::token::verify_token(token, &expected_hash) {
+    if !nexus_link_core::token::verify_token(token, expected_hash) {
         warn!("C&C auth: token verification failed");
         return Err(StatusCode::UNAUTHORIZED.into_response());
     }
@@ -146,6 +152,25 @@ pub async fn require_cmd_auth(
                         )
                             .into_response());
                     }
+                }
+
+                // Nonce replay prevention (SEC-005): reject duplicate nonces
+                // within the ±5 minute window.
+                {
+                    let now = Utc::now();
+                    let expiry = now + Duration::minutes(6);
+                    let mut cache = NONCE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+                    // Lazy cleanup: remove expired entries
+                    cache.retain(|_, exp| *exp > now);
+                    if cache.contains_key(&nonce_str) {
+                        warn!(nonce = %nonce_str, "C&C auth: duplicate nonce (replay attempt)");
+                        return Err((
+                            StatusCode::FORBIDDEN,
+                            axum::Json(json!({ "error": "Duplicate nonce — possible replay" })),
+                        )
+                            .into_response());
+                    }
+                    cache.insert(nonce_str.clone(), expiry);
                 }
 
                 // Buffer the body to compute its hash, then put it back

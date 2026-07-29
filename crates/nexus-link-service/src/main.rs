@@ -42,6 +42,25 @@ async fn main() -> anyhow::Result<()> {
         "Compose channel configured"
     );
 
+    // SEC-006: Warn when signature enforcement is disabled
+    if !config.compose.require_signatures && config.compose.cmd_token.is_some() {
+        warn!(
+            "SECURITY: require_signatures = false — C&C write operations are \
+             protected only by the cmd token. Enable Ed25519 signatures for \
+             cryptographic proof of origin."
+        );
+    }
+
+    // SEC-002/SEC-010: Warn when listening on non-localhost without TLS
+    if config.service.listen_addr != "127.0.0.1" && config.service.listen_addr != "::1" {
+        warn!(
+            listen_addr = %config.service.listen_addr,
+            "SECURITY: Listening on a non-localhost address without TLS. \
+             Bearer tokens will be transmitted in cleartext. Consider binding \
+             to 127.0.0.1 or configuring TLS."
+        );
+    }
+
     let state = Arc::new(AppState::new(config.clone())?);
 
     // ── Command queue poll loop ────────────────────────────────────────────

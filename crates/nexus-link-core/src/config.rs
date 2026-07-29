@@ -241,9 +241,21 @@ impl Config {
     pub fn save_to(&self, path: PathBuf) -> anyhow::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
+            // Restrict directory permissions to owner-only (SEC-001)
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+            }
         }
         let content = toml::to_string_pretty(self)?;
         std::fs::write(&path, content)?;
+        // Restrict config file permissions to owner-only (SEC-001)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        }
         Ok(())
     }
 

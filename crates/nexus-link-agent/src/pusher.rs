@@ -1,5 +1,6 @@
 use nexus_link_core::config::Config;
 use nexus_link_core::telemetry::TelemetryPayload;
+use std::time::Duration;
 use tracing::info;
 
 /// Push telemetry payload to the Nexus backend
@@ -9,7 +10,9 @@ pub async fn push_telemetry(config: &Config, payload: &TelemetryPayload) -> anyh
         config.api.base_url, config.node.node_id
     );
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()?;
     let resp = client
         .post(&url)
         .bearer_auth(config.node_token())
