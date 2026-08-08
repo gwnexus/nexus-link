@@ -6,6 +6,7 @@ use tempfile::TempDir;
 fn make_api_config(base_url: &str) -> ApiConfig {
     ApiConfig {
         base_url: base_url.to_string(),
+        database_url: None,
         tokens: ApiTokens {
             telemetry: Some(TokenEntry {
                 token: "nxs_node_testtoken".to_string(),
@@ -148,6 +149,7 @@ fn test_config_roundtrip_with_custom_compose_dir() {
         },
         api: ApiConfig {
             base_url: "https://api.example.com".to_string(),
+            database_url: None,
             tokens: ApiTokens {
                 telemetry: Some(TokenEntry {
                     token: "nxs_node_y".to_string(),
@@ -229,6 +231,7 @@ fn test_config_node_token_accessor() {
         },
         api: ApiConfig {
             base_url: "https://nexus.gatewarden.eu".to_string(),
+            database_url: None,
             tokens: ApiTokens {
                 telemetry: Some(TokenEntry {
                     token: "nxs_node_primary".to_string(),
