@@ -64,6 +64,9 @@ pub struct RegisterResponse {
     pub cmd_token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signing_public_key: Option<String>,
+    /// PG connection string for LISTEN/NOTIFY wake-up channel (ADR-0071).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database_url: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

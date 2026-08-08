@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-08-08
+
+### Added
+
+- **PG LISTEN/NOTIFY wake-up channel (ADR-0071):** New `pg_listener` module in
+  `nexus-link-service` maintains a persistent PostgreSQL connection subscribed to
+  channel `node_cmd_<nodeId>`. On notification the command poller runs immediately
+  instead of waiting for the next interval tick. Includes automatic reconnection
+  with exponential backoff (1 s → 30 s max). Fully opt-in — requires
+  `database_url` in `[api]` config section.
+- **Adaptive polling via X-Poll-Interval header:** The command poller now reads
+  the `X-Poll-Interval` response header from the `/pending` endpoint and adjusts
+  its fallback HTTP polling interval dynamically (30 s idle, 2 s active).
+- **TLS support for PG connections:** Uses `tokio-postgres-rustls` with
+  `webpki-roots` for secure connections to Supabase session-mode pooler
+  (`sslmode=require`).
+- **Config: `[api].database_url`** — optional PostgreSQL connection string for
+  the LISTEN/NOTIFY channel. When absent, behavior is unchanged (HTTP-only).
+- **Register response: `database_url` field** — the CLI now writes the
+  `database_url` returned by `POST /api/nodes/register` into the local config.
+
+### Changed
+
+- Command poll loop refactored from fixed `tokio::time::interval` to
+  `tokio::select!` over sleep + wake signal, enabling instant response to
+  PG NOTIFY events.
+
 ## [0.8.8] - 2026-06-30
 
 ### Added

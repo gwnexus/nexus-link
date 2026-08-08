@@ -125,6 +125,7 @@ pub async fn execute(
         },
         api: ApiConfig {
             base_url: api_url,
+            database_url: register_resp.database_url.clone(),
             tokens: ApiTokens {
                 telemetry: Some(telemetry_entry),
                 command: command_entry,

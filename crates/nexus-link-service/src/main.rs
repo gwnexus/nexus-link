@@ -11,6 +11,7 @@ use tracing_subscriber::EnvFilter;
 
 mod handlers;
 mod middleware;
+mod pg_listener;
 mod poller;
 mod state;
 
@@ -63,21 +64,60 @@ async fn main() -> anyhow::Result<()> {
 
     let state = Arc::new(AppState::new(config.clone())?);
 
-    // ── Command queue poll loop ────────────────────────────────────────────
+    // ── Command queue poll loop + PG LISTEN/NOTIFY wake-up ───────────────
     if config.compose.cmd_token.is_some() {
         let poll_state = Arc::clone(&state);
         let poll_interval = Duration::from_secs(config.agent.poll_sec);
+
+        // Shared wake signal: PG LISTEN notifications trigger immediate poll
+        let wake = Arc::new(tokio::sync::Notify::new());
+
+        // Start PG LISTEN/NOTIFY listener (no-op if database_url not configured)
+        if config.api.database_url.is_some() {
+            let pg_state = Arc::clone(&state);
+            let pg_wake = Arc::clone(&wake);
+            tokio::spawn(async move {
+                pg_listener::run(pg_state, pg_wake).await;
+            });
+            info!("PG LISTEN/NOTIFY wake-up channel enabled");
+        } else {
+            info!("PG LISTEN/NOTIFY not configured — HTTP-only polling");
+        }
+
+        // Poll loop: runs on interval OR immediately when woken by PG NOTIFY
+        let poll_wake = Arc::clone(&wake);
+        let default_poll_secs = poll_interval.as_secs();
         tokio::spawn(async move {
             info!(
-                interval_s = poll_interval.as_secs(),
+                interval_s = default_poll_secs,
                 "Command queue poll loop started"
             );
-            let mut interval = tokio::time::interval(poll_interval);
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut current_interval = poll_interval;
             loop {
-                interval.tick().await;
-                if let Err(e) = poller::poll_and_execute(&poll_state).await {
-                    warn!("Command queue poll error: {}", e);
+                // Wait for either the interval OR a wake signal
+                tokio::select! {
+                    _ = tokio::time::sleep(current_interval) => {}
+                    _ = poll_wake.notified() => {
+                        tracing::debug!("Poll triggered by PG NOTIFY wake-up");
+                    }
+                }
+                match poller::poll_and_execute(&poll_state).await {
+                    Ok(Some(hint_secs)) if hint_secs > 0 => {
+                        let new_interval = Duration::from_secs(hint_secs);
+                        if new_interval != current_interval {
+                            tracing::debug!(
+                                interval_s = hint_secs,
+                                "Adjusting poll interval via X-Poll-Interval"
+                            );
+                            current_interval = new_interval;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        warn!("Command queue poll error: {}", e);
+                        // Reset to default on error
+                        current_interval = poll_interval;
+                    }
                 }
             }
         });

@@ -39,11 +39,13 @@ fn truncate_output(s: &str) -> String {
 }
 
 /// One poll-and-execute cycle. Called on every tick of the poll interval.
-pub async fn poll_and_execute(state: &Arc<AppState>) -> anyhow::Result<()> {
+/// Returns the suggested next poll interval from the `X-Poll-Interval` header
+/// (in seconds), or `None` if the header is absent.
+pub async fn poll_and_execute(state: &Arc<AppState>) -> anyhow::Result<Option<u64>> {
     let config = &state.config;
 
     let Some(ref cmd_token) = config.compose.cmd_token else {
-        return Ok(());
+        return Ok(None);
     };
 
     let base_url = &config.api.base_url;
@@ -63,21 +65,28 @@ pub async fn poll_and_execute(state: &Arc<AppState>) -> anyhow::Result<()> {
         .send()
         .await?;
 
+    // Parse X-Poll-Interval header
+    let poll_interval_hint = resp
+        .headers()
+        .get("x-poll-interval")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok());
+
     if resp.status() == reqwest::StatusCode::NO_CONTENT {
-        return Ok(());
+        return Ok(poll_interval_hint);
     }
 
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         warn!(status = %status, "Pending commands poll returned error: {}", body);
-        return Ok(());
+        return Ok(poll_interval_hint);
     }
 
     let commands: Vec<ComposeCommandItem> = resp.json().await?;
 
     if commands.is_empty() {
-        return Ok(());
+        return Ok(poll_interval_hint);
     }
 
     info!(count = commands.len(), "Received compose commands");
@@ -112,7 +121,7 @@ pub async fn poll_and_execute(state: &Arc<AppState>) -> anyhow::Result<()> {
         }
     }
 
-    Ok(())
+    Ok(poll_interval_hint)
 }
 
 /// Execute a single queued command and return the result payload.

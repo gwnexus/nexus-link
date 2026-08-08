@@ -66,6 +66,12 @@ pub struct ApiConfig {
     /// Nexus backend base URL
     pub base_url: String,
 
+    /// PostgreSQL connection string for LISTEN/NOTIFY wake-up channel (ADR-0071).
+    /// Must use session-mode pooling (port 5432, not transaction-mode 6543).
+    /// Optional — when absent, the service falls back to HTTP-only polling.
+    #[serde(default)]
+    pub database_url: Option<String>,
+
     /// Token credentials for the two nexus-link channels.
     #[serde(default)]
     pub tokens: ApiTokens,
