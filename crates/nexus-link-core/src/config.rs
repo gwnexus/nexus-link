@@ -2,6 +2,40 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+/// System-level config path for the dedicated `nexus-link` service user.
+pub const SYSTEM_CONFIG_DIR: &str = "/var/lib/nexus-link";
+
+/// The dedicated system user name for nexus-link services.
+pub const SERVICE_USER: &str = "nexus-link";
+
+/// The group name for the nexus-link service user.
+pub const SERVICE_GROUP: &str = "nexus-link";
+
+/// Resolve the effective config path. Priority:
+/// 1. `NEXUS_LINK_CONFIG` env var (explicit override)
+/// 2. System path `/var/lib/nexus-link/config.toml` (if it exists)
+/// 3. User path `~/.nexus-link/config.toml` (legacy fallback)
+pub fn effective_config_path() -> PathBuf {
+    // 1. Explicit env var override
+    if let Ok(p) = std::env::var("NEXUS_LINK_CONFIG") {
+        return PathBuf::from(p);
+    }
+
+    // 2. System path (preferred for service mode)
+    let system_path = system_config_path();
+    if system_path.exists() {
+        return system_path;
+    }
+
+    // 3. Legacy user path
+    default_config_path()
+}
+
+/// System-level config path: /var/lib/nexus-link/config.toml
+pub fn system_config_path() -> PathBuf {
+    PathBuf::from(SYSTEM_CONFIG_DIR).join("config.toml")
+}
+
 /// Default config path: ~/.nexus-link/config.toml
 pub fn default_config_path() -> PathBuf {
     dirs_home().join("config.toml")
@@ -224,9 +258,9 @@ impl Default for ServiceConfig {
 // ---------------------------------------------------------------------------
 
 impl Config {
-    /// Load config from default path
+    /// Load config from the effective path (env var → system → user)
     pub fn load() -> anyhow::Result<Self> {
-        Self::load_from(default_config_path())
+        Self::load_from(effective_config_path())
     }
 
     /// Load config from a specific path
@@ -238,9 +272,9 @@ impl Config {
         Ok(config)
     }
 
-    /// Save config to default path
+    /// Save config to the effective path
     pub fn save(&self) -> anyhow::Result<()> {
-        self.save_to(default_config_path())
+        self.save_to(effective_config_path())
     }
 
     /// Save config to a specific path

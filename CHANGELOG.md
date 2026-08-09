@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-08-09
+
+### Added
+
+- **Dedicated system user `nexus-link`:** Services now run as a minimal-privilege
+  system user with no login shell, no home directory, and `docker` group
+  membership only. Config stored at `/var/lib/nexus-link/config.toml` (mode 600).
+- **`preflight --setup` command:** Creates the system user, config directory,
+  sets permissions, and migrates legacy `~/.nexus-link/` configs automatically.
+- **Automatic setup during `register`:** The registration flow now runs system
+  setup (user creation, directory provisioning) before saving the config. All
+  privileged operations use `sudo` internally — no need to run as root.
+- **`NEXUS_LINK_CONFIG` env var:** Override the config path for any nexus-link
+  binary. Priority: env var → `/var/lib/nexus-link/config.toml` → `~/.nexus-link/config.toml`.
+- **Global `--config` flag:** All CLI commands respect `--config <path>` to
+  specify an explicit config location.
+- **Enhanced systemd hardening:** System-mode units now include
+  `ProtectHome=yes`, `ProtectKernelTunables=yes`, `ProtectControlGroups=yes`,
+  `RestrictSUIDSGID=yes`, and `SupplementaryGroups=docker`.
+
+### Changed
+
+- **Config resolution order:** `Config::load()` now checks env var, system path,
+  then user path (previously only checked `~/.nexus-link/config.toml`).
+- **Systemd units use `User=nexus-link`** when the system config directory
+  exists, instead of running as root or the invoking user.
+- **Signing key storage:** Written alongside config (system path preferred).
+
+### Migration
+
+For existing nodes, run:
+```bash
+sudo nexus-link preflight --setup
+nexus-link agent restart
+```
+This creates the `nexus-link` user, migrates the config, and regenerates
+systemd units. No re-registration required.
+
 ## [0.9.1] - 2026-08-09
 
 ### Fixed

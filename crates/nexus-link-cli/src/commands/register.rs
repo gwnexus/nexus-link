@@ -1,6 +1,6 @@
 use nexus_link_core::config::{
-    AgentConfig, ApiConfig, ApiTokens, ComposeConfig, Config, NodeConfig, ServiceConfig,
-    TokenEntry, dirs_home,
+    AgentConfig, ApiConfig, ApiTokens, ComposeConfig, Config, NodeConfig, SERVICE_GROUP,
+    SERVICE_USER, SYSTEM_CONFIG_DIR, ServiceConfig, TokenEntry, system_config_path,
 };
 use nexus_link_core::preflight::{self, PreflightVerdict};
 use nexus_link_core::types::RegisterRequest;
@@ -53,6 +53,14 @@ pub async fn execute(
     }
 
     info!("Registering node '{}' with Nexus at {}", node_name, api_url);
+
+    // Run system setup (create nexus-link user, dirs, migrate config)
+    println!("Running system setup...");
+    let setup_report = nexus_link_core::setup::run_setup();
+    nexus_link_core::setup::print_report(&setup_report);
+    if !setup_report.success {
+        anyhow::bail!("System setup failed — resolve the issues above before registering.");
+    }
 
     // Validate node token format
     if !nexus_link_core::token::validate_token_format(&token) {
@@ -141,24 +149,60 @@ pub async fn execute(
         },
     };
 
-    config.save()?;
+    // Save config to system path (preferred) or fallback to user path
+    let save_path = if std::path::Path::new(SYSTEM_CONFIG_DIR).exists() {
+        let sys_path = system_config_path();
+        config.save_to(sys_path.clone())?;
+        // Set ownership to nexus-link service user
+        let _ = std::process::Command::new("sudo")
+            .args([
+                "chown",
+                &format!("{}:{}", SERVICE_USER, SERVICE_GROUP),
+                &sys_path.to_string_lossy(),
+            ])
+            .output();
+        let _ = std::process::Command::new("sudo")
+            .args(["chmod", "600", &sys_path.to_string_lossy()])
+            .output();
+        sys_path
+    } else {
+        config.save()?;
+        nexus_link_core::config::effective_config_path()
+    };
 
     // Write signing_key.pub if the backend provided one
     if let Some(ref pubkey_b64) = signing_public_key {
-        let home = dirs_home();
-        std::fs::create_dir_all(&home)?;
-        let key_path = home.join("signing_key.pub");
-        std::fs::write(&key_path, pubkey_b64)?;
+        let key_dir = save_path
+            .parent()
+            .unwrap_or(std::path::Path::new(SYSTEM_CONFIG_DIR));
+        let key_path = key_dir.join("signing_key.pub");
+        // Try direct write first, sudo fallback for /var/lib/nexus-link/
+        if std::fs::write(&key_path, pubkey_b64).is_err() {
+            let mut child = std::process::Command::new("sudo")
+                .args(["tee", &key_path.to_string_lossy()])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .spawn()?;
+            if let Some(stdin) = child.stdin.as_mut() {
+                use std::io::Write;
+                stdin.write_all(pubkey_b64.as_bytes())?;
+            }
+            child.wait()?;
+            let _ = std::process::Command::new("sudo")
+                .args([
+                    "chown",
+                    &format!("{}:{}", SERVICE_USER, SERVICE_GROUP),
+                    &key_path.to_string_lossy(),
+                ])
+                .output();
+        }
         println!("  Signing key: {}", key_path.display());
     }
 
     println!("Node registered successfully!");
     println!("  Node ID: {}", register_resp.node_id);
     println!("  Name:    {}", node_name);
-    println!(
-        "  Config:  {}",
-        nexus_link_core::config::default_config_path().display()
-    );
+    println!("  Config:  {}", save_path.display());
 
     // Remind the operator if the C&C channel is not yet configured
     if config.compose.cmd_token.is_none() {

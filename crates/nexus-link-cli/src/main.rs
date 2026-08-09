@@ -64,7 +64,11 @@ enum Commands {
     },
 
     /// Run device preflight check without registering
-    Preflight,
+    Preflight {
+        /// Also run system setup: create dedicated service user, directories, and permissions
+        #[arg(long)]
+        setup: bool,
+    },
 
     /// Refresh the node token (node token rotation)
     Refresh {
@@ -165,6 +169,12 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
+    // Wire global --config flag into env var so Config::load() picks it up
+    if let Some(ref config_path) = cli.config {
+        // SAFETY: set_var is called before any threads are spawned (single-threaded main).
+        unsafe { std::env::set_var("NEXUS_LINK_CONFIG", config_path) };
+    }
+
     match cli.command {
         Commands::Register {
             api_url,
@@ -186,9 +196,18 @@ async fn main() -> anyhow::Result<()> {
             )
             .await
         }
-        Commands::Preflight => {
+        Commands::Preflight { setup } => {
             let report = nexus_link_core::preflight::run_preflight();
             nexus_link_core::preflight::print_report(&report);
+
+            if setup {
+                let setup_report = nexus_link_core::setup::run_setup();
+                nexus_link_core::setup::print_report(&setup_report);
+                if !setup_report.success {
+                    std::process::exit(1);
+                }
+            }
+
             match report.verdict {
                 nexus_link_core::preflight::PreflightVerdict::Incompatible => {
                     std::process::exit(1);

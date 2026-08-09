@@ -1,4 +1,4 @@
-use nexus_link_core::config::{self, Config};
+use nexus_link_core::config::{self, Config, SERVICE_GROUP, SERVICE_USER, SYSTEM_CONFIG_DIR};
 use std::path::PathBuf;
 use tracing::info;
 
@@ -235,27 +235,42 @@ fn systemd_unit_path(service_name: &str, mode: SystemdMode) -> PathBuf {
 fn generate_systemd_units(mode: SystemdMode) -> anyhow::Result<()> {
     let nexus_link_bin = which_binary("nexus-link-agent")?;
     let nexus_link_service_bin = which_binary("nexus-link-service")?;
-    let config_path = config::default_config_path();
+    let config_path = config::effective_config_path();
     let working_dir = config_path
         .parent()
-        .unwrap_or(&PathBuf::from("/root"))
+        .unwrap_or(&PathBuf::from(SYSTEM_CONFIG_DIR))
         .display()
         .to_string();
 
-    // For system units running as non-root user, we need User= and HOME=
-    let current_user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
-    let current_home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+    // Determine whether we use the dedicated system user or the current user
+    let use_dedicated_user = std::path::Path::new(SYSTEM_CONFIG_DIR).exists();
 
     let (user_directive, install_target, extra_hardening) = match mode {
         SystemdMode::System => {
-            let user_line = if current_user != "root" {
+            let user_line = if use_dedicated_user {
                 format!(
-                    "User={}\nGroup={}\nEnvironment=HOME={}",
-                    current_user, current_user, current_home
+                    "User={}\nGroup={}\nSupplementaryGroups=docker\nEnvironment=NEXUS_LINK_CONFIG={}",
+                    SERVICE_USER,
+                    SERVICE_GROUP,
+                    config_path.display()
                 )
             } else {
-                String::new()
+                let current_user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
+                let current_home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+                if current_user != "root" {
+                    format!(
+                        "User={}\nGroup={}\nEnvironment=HOME={}",
+                        current_user, current_user, current_home
+                    )
+                } else {
+                    String::new()
+                }
             };
+
+            let compose_dir = Config::load()
+                .map(|c| c.compose.dir.display().to_string())
+                .unwrap_or_else(|_| "/opt/dgx-llm".to_string());
+
             (
                 user_line,
                 "WantedBy=multi-user.target".to_string(),
@@ -264,11 +279,14 @@ fn generate_systemd_units(mode: SystemdMode) -> anyhow::Result<()> {
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=read-only
-ReadOnlyPaths=/
-ReadWritePaths={}
-PrivateTmp=true",
-                    working_dir
+ProtectHome=yes
+ReadWritePaths={working_dir} {compose_dir}
+PrivateTmp=true
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes",
+                    working_dir = working_dir,
+                    compose_dir = compose_dir,
                 ),
             )
         }
