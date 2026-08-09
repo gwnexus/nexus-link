@@ -91,6 +91,25 @@ This separation ensures a compromised telemetry process cannot trigger service
 restarts or modify compose configuration. Both tokens are generated together
 during node registration and stored in `~/.nexus-link/config.toml`.
 
+### PG Listener Credential (v0.9.0+)
+
+A third, optional credential enables the real-time command wake-up channel:
+
+```
+┌───────────────────┬─────────────────────────────────────────────┐
+│  Credential       │  database_url (PG connection string)        │
+│  Used by          │  nexus-link-service (LISTEN/NOTIFY)         │
+│  Operations       │  LISTEN only — zero table access            │
+│  Trust level      │  Minimal — cannot read or write any data    │
+│  Provisioned      │  Returned by POST /api/nodes/register       │
+│  Config location  │  [api].database_url                         │
+└───────────────────┴─────────────────────────────────────────────┘
+```
+
+The `nexus_link_listener` database user has `LOGIN` privileges only. It cannot
+SELECT, INSERT, UPDATE, or DELETE any table. Even if the connection string
+leaks, an attacker gains no data access.
+
 ---
 
 ## Compose Management API
@@ -179,6 +198,7 @@ token   = "nxs_node_..."        # telemetry credential
 
 [api]
 base_url         = "https://nexus.gatewarden.eu"
+database_url     = "postgresql://nexus_link_listener.<ref>:<password>@<pooler-host>:5432/postgres?sslmode=require"
 push_interval_secs = 10
 
 [service]
@@ -268,12 +288,37 @@ A hybrid data channel decouples telemetry from compose management:
 │  On-Premise Node (DGX Spark / A100 / H100)                             │
 │                                                                        │
 │  nexus-link-agent ──────────── nxs_node_* ────────────► Nexus API     │
-│  (telemetry push, 10s)          POST /api/nodes/:id/telemetry          │
+│  (telemetry push, 6s)            POST /api/nodes/:id/telemetry         │
 │                                                                        │
 │  nexus-link-service ◄─── nxs_cmd_* + Ed25519 sig ─── Nexus Dashboard │
-│  (axum HTTP :8443)              /api/compose/*                         │
+│  (axum HTTP :8443)               /api/compose/*                        │
+│                                                                        │
+│  nexus-link-service ◄─── PG LISTEN/NOTIFY ─── Supabase (port 5432)   │
+│  (wake-up channel)               channel: node_cmd_<nodeId>            │
+│                                  Triggers instant command poll          │
 └────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Command Queue (ADR-0071)
+
+The service uses a **reverse-agent pattern**: it polls the Nexus backend for
+pending commands (`GET /api/nodes/:id/compose/commands/pending`). Starting with
+v0.9.0, a PostgreSQL `LISTEN/NOTIFY` channel provides **instant wake-up** so
+commands are picked up within milliseconds instead of waiting for the next poll
+interval.
+
+| Mode             | Latency       | Requires              |
+|------------------|---------------|-----------------------|
+| HTTP polling     | 2-30 s        | `nxs_cmd_*` token     |
+| PG LISTEN/NOTIFY | < 100 ms      | `database_url` in config |
+| Combined (default) | < 100 ms active, 30 s idle | Both configured |
+
+The HTTP poll loop respects the `X-Poll-Interval` response header from the
+backend: 2 s when commands are pending (active mode), 30 s when idle.
+PG NOTIFY bypasses the interval entirely for instant response.
+
+**Fallback:** If the PG connection drops, the service continues with HTTP
+polling and reconnects with exponential backoff (1 s to 30 s max).
 
 ### Components
 
