@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   PG TLS handshake. Now explicitly installs the `ring` provider at pg_listener
   startup. Affects only devices with `database_url` configured.
 
+### Changed
+
+- **Docs:** Updated README with PG LISTEN/NOTIFY architecture diagram, command
+  queue latency table, and PG listener credential security documentation.
+  Added `database_url` to config example.
+
 ## [0.9.0] - 2026-08-08
 
 ### Added
