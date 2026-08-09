@@ -51,6 +51,9 @@ pub async fn run(state: Arc<AppState>, wake: Arc<Notify>) {
 
 /// Build a rustls TLS connector for PostgreSQL.
 fn make_tls_connector() -> MakeRustlsConnect {
+    // Ensure a CryptoProvider is installed (ring via feature flag).
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let mut root_store = rustls::RootCertStore::empty();
     root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
