@@ -1316,7 +1316,7 @@ dependencies = [
 
 [[package]]
 name = "nexus-link-agent"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "anyhow",
  "bollard",
@@ -1334,7 +1334,7 @@ dependencies = [
 
 [[package]]
 name = "nexus-link-cli"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1351,7 +1351,7 @@ dependencies = [
 
 [[package]]
 name = "nexus-link-core"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -1369,7 +1369,7 @@ dependencies = [
 
 [[package]]
 name = "nexus-link-service"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -1402,7 +1402,7 @@ dependencies = [
 
 [[package]]
 name = "nexus-link-tests"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "chrono",
  "nexus-link-core",

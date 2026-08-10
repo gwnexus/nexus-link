@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-08-10
+
+### Added
+
+- **`preflight --setup` full provisioning:** Installs binaries to `/usr/local/bin/`
+  (replaces symlinks to user-local paths), writes hardened systemd unit files,
+  runs `daemon-reload`, and enables+starts both services. Single command setup.
+- **Comprehensive `reset` command:** Full teardown — stops and disables services,
+  removes systemd unit files, deletes `/var/lib/nexus-link/` and `~/.nexus-link/`,
+  uninstalls binaries from `/usr/local/bin/`, removes the `nexus-link` system user.
+  Clean slate for re-registration.
+- **`setup_tests.rs`:** Unit tests for setup constants and struct validation.
+
+### Fixed
+
+- **Binary permission denied:** `preflight --setup` now copies binaries to
+  `/usr/local/bin/` instead of relying on symlinks into user home directories
+  (which the `nexus-link` system user cannot access).
+
 ## [0.10.0] - 2026-08-09
 
 ### Added
