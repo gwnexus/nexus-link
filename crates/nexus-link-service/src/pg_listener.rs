@@ -39,7 +39,7 @@ pub async fn run(state: Arc<AppState>, wake: Arc<Notify>) {
             Err(e) => {
                 error!(
                     backoff_s = backoff_secs,
-                    "PG LISTEN error: {} — reconnecting", e
+                    "PG LISTEN error: {:?} — reconnecting", e
                 );
             }
         }

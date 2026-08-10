@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.4] - 2026-08-10
+
+### Fixed
+
+- **Compose logs timeout:** `docker compose logs --tail N` applies per-container,
+  resulting in N × num_containers lines and slow execution when no service is
+  specified. Now adds `--since 5m` to bound the time range and reduce output.
+- **Output cap:** Log snapshot results are capped at 500 lines max to prevent
+  oversized payloads that approach the 30s frontend timeout.
+- **Default tail reduced:** Changed from 200 to 100 lines per container.
+- **Improved debug logging:** PG LISTEN errors now use Debug formatting to show
+  full error chain instead of generic "db error".
+
 ## [0.10.3] - 2026-08-10
 
 ### Fixed

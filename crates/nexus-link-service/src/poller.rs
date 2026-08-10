@@ -310,7 +310,7 @@ async fn execute_logs_snapshot(
         .args
         .get("tail")
         .and_then(|v| v.as_u64())
-        .unwrap_or(200)
+        .unwrap_or(100)
         .to_string();
     let service = cmd.args.get("service").and_then(|v| v.as_str());
 
@@ -323,6 +323,13 @@ async fn execute_logs_snapshot(
         "--tail".to_string(),
         tail,
     ];
+    // When no specific service is given, --tail N applies per-container
+    // which can result in N * num_containers lines and slow execution.
+    // Add --since to limit the time range and speed up the query.
+    if service.is_none() {
+        args.push("--since".to_string());
+        args.push("5m".to_string());
+    }
     if let Some(svc) = service {
         // SEC-003: Validate service name — reject flag-like values and special chars
         // to prevent argument injection into docker compose logs.
@@ -366,12 +373,16 @@ async fn execute_logs_snapshot(
         Ok(Ok(output)) => {
             let combined = String::from_utf8_lossy(&output.stdout).to_string()
                 + &String::from_utf8_lossy(&output.stderr);
-            let lines: Vec<&str> = combined.lines().collect();
+            // Cap output to prevent oversized payloads and slow transfers
+            const MAX_LINES: usize = 500;
+            let lines: Vec<&str> = combined.lines().take(MAX_LINES).collect();
+            let truncated = combined.lines().count() > MAX_LINES;
             ComposeCommandResult {
                 status: ComposeCommandStatus::Completed,
                 result: Some(serde_json::json!({
                     "service": service,
                     "lines": lines,
+                    "truncated": truncated,
                 })),
                 error: None,
             }
