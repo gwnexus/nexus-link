@@ -346,15 +346,40 @@ fn install_binaries() -> SetupStep {
     };
 
     let install_dir = Path::new(INSTALL_DIR);
+
+    // If source == target, binaries are already in the install dir.
+    // Check common user-local paths as alternative source (post-upgrade scenario).
+    let effective_source = if source_dir == install_dir {
+        find_user_binary_dir().unwrap_or(source_dir)
+    } else {
+        source_dir
+    };
+
+    // If still the same, binaries are already correctly installed
+    if effective_source == install_dir {
+        return SetupStep {
+            name: "Install binaries",
+            status: StepStatus::Skipped,
+            message: "Binaries already in /usr/local/bin (up to date)".to_string(),
+        };
+    }
+
     let mut installed = Vec::new();
     let mut errors = Vec::new();
 
     for bin_name in BINARIES {
-        let source = source_dir.join(bin_name);
+        let source = effective_source.join(bin_name);
         let target = install_dir.join(bin_name);
 
         if !source.exists() {
             // Binary may not be present (e.g. single-binary installs) — skip
+            continue;
+        }
+
+        // Skip if source and target are the same file
+        if let (Ok(s), Ok(t)) = (source.canonicalize(), target.canonicalize())
+            && s == t
+        {
             continue;
         }
 
@@ -400,6 +425,28 @@ fn install_binaries() -> SetupStep {
             ),
         }
     }
+}
+
+/// Search common user-local binary directories for nexus-link binaries.
+/// Used when the running binary is already in /usr/local/bin/ (post-upgrade
+/// installs new versions to ~/.local/bin/ but the running process is the old one).
+fn find_user_binary_dir() -> Option<PathBuf> {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("SUDO_USER").map(|u| format!("/home/{}", u)))
+        .unwrap_or_else(|_| "/root".to_string());
+
+    let candidates = [
+        PathBuf::from(&home).join(".local/bin"),
+        PathBuf::from(&home).join(".cargo/bin"),
+    ];
+
+    for dir in &candidates {
+        if dir.join("nexus-link").exists() && dir != Path::new(INSTALL_DIR) {
+            return Some(dir.clone());
+        }
+    }
+
+    None
 }
 
 // ── Systemd units ───────────────────────────────────────────────────────────
