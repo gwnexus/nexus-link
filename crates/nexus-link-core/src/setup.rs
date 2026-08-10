@@ -431,13 +431,18 @@ fn install_binaries() -> SetupStep {
 /// Used when the running binary is already in /usr/local/bin/ (post-upgrade
 /// installs new versions to ~/.local/bin/ but the running process is the old one).
 fn find_user_binary_dir() -> Option<PathBuf> {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("SUDO_USER").map(|u| format!("/home/{}", u)))
+    // Under sudo, HOME is /root but SUDO_USER has the real invoking user.
+    // Check SUDO_USER first to find binaries installed by the operator.
+    let invoking_home = std::env::var("SUDO_USER")
+        .map(|u| format!("/home/{}", u))
+        .or_else(|_| std::env::var("HOME"))
         .unwrap_or_else(|_| "/root".to_string());
 
     let candidates = [
-        PathBuf::from(&home).join(".local/bin"),
-        PathBuf::from(&home).join(".cargo/bin"),
+        PathBuf::from(&invoking_home).join(".local/bin"),
+        PathBuf::from(&invoking_home).join(".cargo/bin"),
+        // Also check /root/.local/bin in case the install was done as root
+        PathBuf::from("/root/.local/bin"),
     ];
 
     for dir in &candidates {
