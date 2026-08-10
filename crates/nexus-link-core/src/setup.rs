@@ -38,6 +38,9 @@ pub fn run_setup() -> SetupReport {
         add_docker_group(),
         create_config_dir(),
         migrate_legacy_config(),
+        install_binaries(),
+        install_systemd_units(),
+        enable_services(),
     ];
 
     let success = steps.iter().all(|s| s.status != StepStatus::Failed);
@@ -257,6 +260,242 @@ fn migrate_legacy_config() -> SetupStep {
             status: StepStatus::Failed,
             message: format!("Failed: {}", e),
         },
+    }
+}
+
+// ── Binary installation ─────────────────────────────────────────────────────
+
+/// Target directory for system-wide binary installation.
+const INSTALL_DIR: &str = "/usr/local/bin";
+
+/// Binary names shipped by nexus-link.
+const BINARIES: &[&str] = &["nexus-link", "nexus-link-agent", "nexus-link-service"];
+
+fn install_binaries() -> SetupStep {
+    // Resolve the currently running executable to find the source directory.
+    let current_exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            return SetupStep {
+                name: "Install binaries",
+                status: StepStatus::Failed,
+                message: format!("Cannot resolve current executable: {}", e),
+            };
+        }
+    };
+
+    // Canonicalize to resolve symlinks (e.g. /usr/local/bin/nexus-link -> ~/.local/bin/nexus-link)
+    let real_exe = match current_exe.canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            return SetupStep {
+                name: "Install binaries",
+                status: StepStatus::Failed,
+                message: format!("Cannot canonicalize executable path: {}", e),
+            };
+        }
+    };
+
+    let source_dir = match real_exe.parent() {
+        Some(d) => d.to_path_buf(),
+        None => {
+            return SetupStep {
+                name: "Install binaries",
+                status: StepStatus::Failed,
+                message: "Cannot determine source binary directory".to_string(),
+            };
+        }
+    };
+
+    let install_dir = Path::new(INSTALL_DIR);
+    let mut installed = Vec::new();
+    let mut errors = Vec::new();
+
+    for bin_name in BINARIES {
+        let source = source_dir.join(bin_name);
+        let target = install_dir.join(bin_name);
+
+        if !source.exists() {
+            // Binary may not be present (e.g. single-binary installs) — skip
+            continue;
+        }
+
+        // Remove existing symlink or file at target
+        if (target.exists() || target.symlink_metadata().is_ok())
+            && let Err(e) = sudo(&["rm", "-f", &target.to_string_lossy()])
+        {
+            errors.push(format!("{}: {}", bin_name, e));
+            continue;
+        }
+
+        // Copy binary to system path
+        let result = sudo(&["cp", &source.to_string_lossy(), &target.to_string_lossy()])
+            .and_then(|()| sudo(&["chmod", "755", &target.to_string_lossy()]));
+
+        match result {
+            Ok(()) => installed.push(*bin_name),
+            Err(e) => errors.push(format!("{}: {}", bin_name, e)),
+        }
+    }
+
+    if !errors.is_empty() {
+        SetupStep {
+            name: "Install binaries",
+            status: StepStatus::Failed,
+            message: format!("Errors: {}", errors.join("; ")),
+        }
+    } else if installed.is_empty() {
+        SetupStep {
+            name: "Install binaries",
+            status: StepStatus::Skipped,
+            message: "No binaries found in source directory".to_string(),
+        }
+    } else {
+        SetupStep {
+            name: "Install binaries",
+            status: StepStatus::Created,
+            message: format!(
+                "Installed {} → {} ({})",
+                installed.len(),
+                INSTALL_DIR,
+                installed.join(", ")
+            ),
+        }
+    }
+}
+
+// ── Systemd units ───────────────────────────────────────────────────────────
+
+const SYSTEMD_DIR: &str = "/etc/systemd/system";
+
+const AGENT_UNIT: &str = r#"[Unit]
+Description=Nexus Link Agent — telemetry push daemon
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=nexus-link
+Group=nexus-link
+SupplementaryGroups=docker
+ExecStart=/usr/local/bin/nexus-link-agent
+Restart=on-failure
+RestartSec=5
+Environment=NEXUS_LINK_CONFIG=/var/lib/nexus-link/config.toml
+
+# Hardening
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+NoNewPrivileges=true
+ReadWritePaths=/var/lib/nexus-link
+
+[Install]
+WantedBy=multi-user.target
+"#;
+
+const SERVICE_UNIT: &str = r#"[Unit]
+Description=Nexus Link Service — command receiver (HTTPS :8443)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=nexus-link
+Group=nexus-link
+SupplementaryGroups=docker
+ExecStart=/usr/local/bin/nexus-link-service
+Restart=on-failure
+RestartSec=5
+Environment=NEXUS_LINK_CONFIG=/var/lib/nexus-link/config.toml
+
+# Hardening
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+NoNewPrivileges=true
+ReadWritePaths=/var/lib/nexus-link
+
+[Install]
+WantedBy=multi-user.target
+"#;
+
+fn install_systemd_units() -> SetupStep {
+    let agent_path = format!("{}/nexus-link-agent.service", SYSTEMD_DIR);
+    let service_path = format!("{}/nexus-link-service.service", SYSTEMD_DIR);
+
+    // Write unit files via tee (sudo)
+    let result = write_file_sudo(&agent_path, AGENT_UNIT)
+        .and_then(|()| write_file_sudo(&service_path, SERVICE_UNIT))
+        .and_then(|()| sudo(&["systemctl", "daemon-reload"]));
+
+    match result {
+        Ok(()) => SetupStep {
+            name: "Systemd units",
+            status: StepStatus::Created,
+            message: "Installed nexus-link-agent.service + nexus-link-service.service, daemon-reload done".to_string(),
+        },
+        Err(e) => SetupStep {
+            name: "Systemd units",
+            status: StepStatus::Failed,
+            message: format!("Failed: {}", e),
+        },
+    }
+}
+
+fn enable_services() -> SetupStep {
+    let result = sudo(&["systemctl", "enable", "--now", "nexus-link-agent.service"])
+        .and_then(|()| sudo(&["systemctl", "enable", "--now", "nexus-link-service.service"]));
+
+    match result {
+        Ok(()) => SetupStep {
+            name: "Enable services",
+            status: StepStatus::Created,
+            message: "Enabled and started nexus-link-agent + nexus-link-service".to_string(),
+        },
+        Err(e) => SetupStep {
+            name: "Enable services",
+            status: StepStatus::Failed,
+            message: format!("Failed: {}", e),
+        },
+    }
+}
+
+/// Write content to a file via sudo tee.
+fn write_file_sudo(path: &str, content: &str) -> Result<(), String> {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let mut child = Command::new("sudo")
+        .args(["tee", path])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn sudo tee: {}", e))?;
+
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(content.as_bytes())
+        .map_err(|e| format!("Failed to write to {}: {}", path, e))?;
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("Failed to wait for sudo tee: {}", e))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("sudo tee {} exited with {}", path, status))
     }
 }
 

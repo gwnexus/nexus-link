@@ -237,12 +237,19 @@ nexus-link register --token <nxs_node_*> --cmd-token <nxs_cmd_*>
 nexus-link preflight
   Run device compatibility check only (no registration).
 
+nexus-link preflight --setup
+  Full system provisioning: create nexus-link system user, install binaries
+  to /usr/local/bin/, write systemd units, migrate config, enable and start
+  services. Run with sudo. Idempotent — safe to re-run.
+
 nexus-link status
   Show node registration and agent status.
 
 nexus-link reset [--force]
-  Hard-reset: stop and disable all nexus-link services, remove ~/.nexus-link/
-  entirely. Use after deleting the node in the Nexus dashboard.
+  Hard-reset: stop and disable all services, remove systemd unit files,
+  delete /var/lib/nexus-link/ and ~/.nexus-link/, uninstall binaries from
+  /usr/local/bin/, remove the nexus-link system user. Use after deleting the
+  node in the Nexus dashboard for a clean slate.
   Docker containers and compose files are not affected.
 
 nexus-link unregister [--force]

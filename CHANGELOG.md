@@ -12,8 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dedicated system user `nexus-link`:** Services now run as a minimal-privilege
   system user with no login shell, no home directory, and `docker` group
   membership only. Config stored at `/var/lib/nexus-link/config.toml` (mode 600).
-- **`preflight --setup` command:** Creates the system user, config directory,
-  sets permissions, and migrates legacy `~/.nexus-link/` configs automatically.
+- **`preflight --setup` command:** Full automated provisioning: creates the system
+  user, config directory, migrates legacy configs, installs binaries to
+  `/usr/local/bin/` (replacing symlinks), writes systemd unit files, runs
+  `daemon-reload`, and enables+starts both services. Single command, idempotent.
+- **Systemd unit installation:** `preflight --setup` writes hardened unit files
+  for `nexus-link-agent.service` and `nexus-link-service.service` with
+  `ProtectHome`, `ProtectSystem=strict`, `RestrictSUIDSGID`, `NoNewPrivileges`.
 - **Automatic setup during `register`:** The registration flow now runs system
   setup (user creation, directory provisioning) before saving the config. All
   privileged operations use `sudo` internally — no need to run as root.
@@ -21,9 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binary. Priority: env var → `/var/lib/nexus-link/config.toml` → `~/.nexus-link/config.toml`.
 - **Global `--config` flag:** All CLI commands respect `--config <path>` to
   specify an explicit config location.
-- **Enhanced systemd hardening:** System-mode units now include
-  `ProtectHome=yes`, `ProtectKernelTunables=yes`, `ProtectControlGroups=yes`,
-  `RestrictSUIDSGID=yes`, and `SupplementaryGroups=docker`.
+- **Enhanced `reset` command:** Now performs full teardown — stops services,
+  removes systemd unit files, deletes both legacy (`~/.nexus-link/`) and system
+  (`/var/lib/nexus-link/`) directories, uninstalls binaries from `/usr/local/bin/`,
+  and removes the `nexus-link` system user. Clean slate for re-registration.
 
 ### Changed
 
