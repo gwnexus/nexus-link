@@ -1,11 +1,12 @@
-use nexus_link_core::config::{SERVICE_GROUP, SERVICE_USER, SYSTEM_CONFIG_DIR};
+use nexus_link_core::config::{SERVICE_GROUP, SERVICE_USER, SYSTEM_CONFIG_DIR, SYSTEM_STATE_DIR};
 use nexus_link_core::setup::{SetupReport, SetupStep, StepStatus};
 
 #[test]
 fn test_setup_constants_are_consistent() {
     assert_eq!(SERVICE_USER, "nexus-link");
     assert_eq!(SERVICE_GROUP, "nexus-link");
-    assert_eq!(SYSTEM_CONFIG_DIR, "/var/lib/nexus-link");
+    assert_eq!(SYSTEM_CONFIG_DIR, "/etc/nexus-link");
+    assert_eq!(SYSTEM_STATE_DIR, "/var/lib/nexus-link");
 }
 
 #[test]

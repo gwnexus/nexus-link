@@ -247,9 +247,9 @@ nexus-link status
 
 nexus-link reset [--force]
   Hard-reset: stop and disable all services, remove systemd unit files,
-  delete /var/lib/nexus-link/ and ~/.nexus-link/, uninstall binaries from
-  /usr/local/bin/, remove the nexus-link system user. Use after deleting the
-  node in the Nexus dashboard for a clean slate.
+  delete /etc/nexus-link/, /var/lib/nexus-link/, and ~/.nexus-link/,
+  uninstall binaries from /usr/local/bin/, remove the nexus-link system
+  user. Use after deleting the node in the Nexus dashboard for a clean slate.
   Docker containers and compose files are not affected.
 
 nexus-link unregister [--force]

@@ -1,4 +1,6 @@
-use nexus_link_core::config::{self, Config, SERVICE_USER, SYSTEM_CONFIG_DIR, dirs_home};
+use nexus_link_core::config::{
+    self, Config, SERVICE_USER, SYSTEM_CONFIG_DIR, SYSTEM_STATE_DIR, dirs_home,
+};
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::Command;
@@ -15,14 +17,15 @@ use tracing::info;
 ///   - Does NOT send any heartbeat to the backend (device may already be gone)
 ///   - Stops AND disables both nexus-link-agent and nexus-link-service
 ///   - Removes systemd unit files and reloads daemon
-///   - Removes all files in ~/.nexus-link/ AND /var/lib/nexus-link/
+///   - Removes all files in ~/.nexus-link/, /etc/nexus-link/, AND /var/lib/nexus-link/
 ///   - Removes installed binaries from /usr/local/bin/
 ///   - Removes the nexus-link system user
 ///   - Never touches Docker containers or compose files
 pub async fn execute(force: bool) -> anyhow::Result<()> {
     let home = dirs_home();
     let config_path = config::default_config_path();
-    let system_dir = Path::new(SYSTEM_CONFIG_DIR);
+    let config_dir = Path::new(SYSTEM_CONFIG_DIR);
+    let state_dir = Path::new(SYSTEM_STATE_DIR);
 
     // Describe what will be removed
     let node_info = if config_path.exists() {
@@ -30,8 +33,10 @@ pub async fn execute(force: bool) -> anyhow::Result<()> {
             Ok(c) => format!("node '{}' (ID: {})", c.node.name, c.node.node_id),
             Err(_) => "node (config unreadable)".to_string(),
         }
-    } else if system_dir.join("config.toml").exists() {
+    } else if config_dir.join("config.toml").exists() {
         "node (system config)".to_string()
+    } else if state_dir.join("config.toml").exists() {
+        "node (legacy system config)".to_string()
     } else {
         "node (no config found)".to_string()
     };
@@ -41,7 +46,8 @@ pub async fn execute(force: bool) -> anyhow::Result<()> {
         println!();
         println!("  The following will be removed:");
         println!("    {}  (legacy user directory)", home.display());
-        println!("    {}  (system directory)", SYSTEM_CONFIG_DIR);
+        println!("    {}  (system config directory)", SYSTEM_CONFIG_DIR);
+        println!("    {}  (runtime state directory)", SYSTEM_STATE_DIR);
         println!("    /usr/local/bin/nexus-link*  (installed binaries)");
         println!("    /etc/systemd/system/nexus-link-*.service  (unit files)");
         println!("    System user '{}'", SERVICE_USER);
@@ -75,8 +81,11 @@ pub async fn execute(force: bool) -> anyhow::Result<()> {
     // 3. Remove the legacy ~/.nexus-link/ directory
     remove_dir_if_exists(&home, "legacy config dir");
 
-    // 4. Remove the system /var/lib/nexus-link/ directory
-    remove_system_dir(system_dir);
+    // 4. Remove the system /etc/nexus-link/ directory
+    remove_system_dir(config_dir);
+
+    // 5. Remove the runtime state /var/lib/nexus-link/ directory
+    remove_system_dir(state_dir);
 
     // 5. Remove installed binaries from /usr/local/bin/
     remove_installed_binaries();

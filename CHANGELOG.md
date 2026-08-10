@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.2] - 2026-08-10
+
+### Changed
+
+- **Config path moved to `/etc/nexus-link/config.toml`:** FHS-compliant location
+  for service configuration. Root-owned (mode 644), readable by the `nexus-link`
+  service user. Operators edit with `sudo`.
+- **Runtime state directory stays at `/var/lib/nexus-link/`:** Signing keys and
+  transient state remain service-owned (mode 700). Config no longer stored here.
+- **Config resolution order updated:** env var → `/etc/nexus-link/config.toml` →
+  `/var/lib/nexus-link/config.toml` (legacy) → `~/.nexus-link/config.toml`.
+- **`preflight --setup` creates both directories:** `/etc/nexus-link/` (root:root,
+  755) for config and `/var/lib/nexus-link/` (nexus-link:nexus-link, 700) for state.
+- **Config migration priority:** Migrates from `/var/lib/nexus-link/config.toml`
+  (v0.10.0/v0.10.1) first, then `~/.nexus-link/config.toml` (original legacy).
+- **Systemd units use `/etc/nexus-link/config.toml`** via `NEXUS_LINK_CONFIG` env.
+- **`reset` command cleans all paths:** `/etc/nexus-link/`, `/var/lib/nexus-link/`,
+  `~/.nexus-link/`, binaries, unit files, and system user.
+
+### Fixed
+
+- **PG LISTEN/NOTIFY TLS handshake failure:** Supabase Pooler uses a private CA
+  (Supabase Root 2021 CA) not present in public root stores. The TLS connector
+  now accepts any server certificate (equivalent to PostgreSQL `sslmode=require` —
+  encrypted transport without server identity verification).
+
+### Migration
+
+For nodes already running v0.10.0 or v0.10.1:
+```bash
+nexus-link upgrade
+sudo nexus-link preflight --setup
+```
+This migrates the config from `/var/lib/nexus-link/` to `/etc/nexus-link/`
+automatically and restarts services.
+
 ## [0.10.1] - 2026-08-10
 
 ### Added

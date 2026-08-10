@@ -2,8 +2,11 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// System-level config path for the dedicated `nexus-link` service user.
-pub const SYSTEM_CONFIG_DIR: &str = "/var/lib/nexus-link";
+/// System-level config directory (FHS-compliant, root-owned, service reads).
+pub const SYSTEM_CONFIG_DIR: &str = "/etc/nexus-link";
+
+/// Runtime state directory (service-owned: keys, PID files, transient state).
+pub const SYSTEM_STATE_DIR: &str = "/var/lib/nexus-link";
 
 /// The dedicated system user name for nexus-link services.
 pub const SERVICE_USER: &str = "nexus-link";
@@ -13,25 +16,32 @@ pub const SERVICE_GROUP: &str = "nexus-link";
 
 /// Resolve the effective config path. Priority:
 /// 1. `NEXUS_LINK_CONFIG` env var (explicit override)
-/// 2. System path `/var/lib/nexus-link/config.toml` (if it exists)
-/// 3. User path `~/.nexus-link/config.toml` (legacy fallback)
+/// 2. System path `/etc/nexus-link/config.toml` (FHS standard)
+/// 3. Legacy system path `/var/lib/nexus-link/config.toml` (auto-migrated)
+/// 4. User path `~/.nexus-link/config.toml` (legacy fallback)
 pub fn effective_config_path() -> PathBuf {
     // 1. Explicit env var override
     if let Ok(p) = std::env::var("NEXUS_LINK_CONFIG") {
         return PathBuf::from(p);
     }
 
-    // 2. System path (preferred for service mode)
+    // 2. System config path (preferred for service mode)
     let system_path = system_config_path();
     if system_path.exists() {
         return system_path;
     }
 
-    // 3. Legacy user path
+    // 3. Legacy system path (pre-v0.10.2 migration path)
+    let legacy_system = PathBuf::from(SYSTEM_STATE_DIR).join("config.toml");
+    if legacy_system.exists() {
+        return legacy_system;
+    }
+
+    // 4. Legacy user path
     default_config_path()
 }
 
-/// System-level config path: /var/lib/nexus-link/config.toml
+/// System-level config path: /etc/nexus-link/config.toml
 pub fn system_config_path() -> PathBuf {
     PathBuf::from(SYSTEM_CONFIG_DIR).join("config.toml")
 }

@@ -160,45 +160,71 @@ fn add_docker_group() -> SetupStep {
 }
 
 fn create_config_dir() -> SetupStep {
-    let dir = Path::new(SYSTEM_CONFIG_DIR);
+    let config_dir = Path::new(SYSTEM_CONFIG_DIR);
+    let state_dir = Path::new(config::SYSTEM_STATE_DIR);
 
-    if dir.exists() {
-        return SetupStep {
-            name: "Config directory",
-            status: StepStatus::Skipped,
-            message: format!("{} already exists", SYSTEM_CONFIG_DIR),
-        };
+    let mut created = Vec::new();
+
+    // Create /etc/nexus-link/ (root-owned, readable by service)
+    if !config_dir.exists() {
+        let result = sudo(&["mkdir", "-p", SYSTEM_CONFIG_DIR])
+            .and_then(|()| sudo(&["chown", "root:root", SYSTEM_CONFIG_DIR]))
+            .and_then(|()| sudo(&["chmod", "755", SYSTEM_CONFIG_DIR]));
+        match result {
+            Ok(()) => created.push(SYSTEM_CONFIG_DIR),
+            Err(e) => {
+                return SetupStep {
+                    name: "Config directory",
+                    status: StepStatus::Failed,
+                    message: format!("Failed to create {}: {}", SYSTEM_CONFIG_DIR, e),
+                };
+            }
+        }
     }
 
-    let result = sudo(&["mkdir", "-p", SYSTEM_CONFIG_DIR])
-        .and_then(|()| {
-            sudo(&[
-                "chown",
-                &format!("{}:{}", SERVICE_USER, SERVICE_GROUP),
-                SYSTEM_CONFIG_DIR,
-            ])
-        })
-        .and_then(|()| sudo(&["chmod", "700", SYSTEM_CONFIG_DIR]));
+    // Create /var/lib/nexus-link/ (service-owned, for runtime state/keys)
+    if !state_dir.exists() {
+        let result = sudo(&["mkdir", "-p", config::SYSTEM_STATE_DIR])
+            .and_then(|()| {
+                sudo(&[
+                    "chown",
+                    &format!("{}:{}", SERVICE_USER, SERVICE_GROUP),
+                    config::SYSTEM_STATE_DIR,
+                ])
+            })
+            .and_then(|()| sudo(&["chmod", "700", config::SYSTEM_STATE_DIR]));
+        match result {
+            Ok(()) => created.push(config::SYSTEM_STATE_DIR),
+            Err(e) => {
+                return SetupStep {
+                    name: "Config directory",
+                    status: StepStatus::Failed,
+                    message: format!("Failed to create {}: {}", config::SYSTEM_STATE_DIR, e),
+                };
+            }
+        }
+    }
 
-    match result {
-        Ok(()) => SetupStep {
-            name: "Config directory",
-            status: StepStatus::Created,
+    if created.is_empty() {
+        SetupStep {
+            name: "Directories",
+            status: StepStatus::Skipped,
             message: format!(
-                "Created {} (owner: {}, mode: 700)",
-                SYSTEM_CONFIG_DIR, SERVICE_USER
+                "{} and {} already exist",
+                SYSTEM_CONFIG_DIR,
+                config::SYSTEM_STATE_DIR
             ),
-        },
-        Err(e) => SetupStep {
-            name: "Config directory",
-            status: StepStatus::Failed,
-            message: format!("Failed: {}", e),
-        },
+        }
+    } else {
+        SetupStep {
+            name: "Directories",
+            status: StepStatus::Created,
+            message: format!("Created: {}", created.join(", ")),
+        }
     }
 }
 
 fn migrate_legacy_config() -> SetupStep {
-    let legacy_path = config::default_config_path();
     let system_path = config::system_config_path();
 
     if system_path.exists() {
@@ -209,51 +235,63 @@ fn migrate_legacy_config() -> SetupStep {
         };
     }
 
-    if !legacy_path.exists() {
+    // Check migration sources in priority order:
+    // 1. /var/lib/nexus-link/config.toml (from v0.10.0/v0.10.1 setup)
+    // 2. ~/.nexus-link/config.toml (original legacy path)
+    let var_lib_config = PathBuf::from(config::SYSTEM_STATE_DIR).join("config.toml");
+    let legacy_path = config::default_config_path();
+
+    let source = if var_lib_config.exists() {
+        var_lib_config
+    } else if legacy_path.exists() {
+        legacy_path
+    } else {
         return SetupStep {
             name: "Config migration",
             status: StepStatus::Skipped,
             message: "No legacy config found — will be created at registration".to_string(),
         };
-    }
+    };
 
-    let legacy_str = legacy_path.to_string_lossy().to_string();
+    let source_str = source.to_string_lossy().to_string();
     let system_str = system_path.to_string_lossy().to_string();
 
-    let result = sudo(&["cp", "-p", &legacy_str, &system_str])
-        .and_then(|()| {
-            sudo(&[
-                "chown",
-                &format!("{}:{}", SERVICE_USER, SERVICE_GROUP),
-                &system_str,
-            ])
-        })
-        .and_then(|()| sudo(&["chmod", "600", &system_str]));
+    let result = sudo(&["cp", "-p", &source_str, &system_str])
+        .and_then(|()| sudo(&["chown", "root:root", &system_str]))
+        .and_then(|()| sudo(&["chmod", "644", &system_str]));
 
-    // Also migrate signing_key.pub if present
-    let legacy_key = config::dirs_home().join("signing_key.pub");
-    let system_key = PathBuf::from(SYSTEM_CONFIG_DIR).join("signing_key.pub");
-    if legacy_key.exists() && !system_key.exists() {
-        let _ = sudo(&[
-            "cp",
-            "-p",
-            &legacy_key.to_string_lossy(),
-            &system_key.to_string_lossy(),
-        ])
-        .and_then(|()| {
-            sudo(&[
-                "chown",
-                &format!("{}:{}", SERVICE_USER, SERVICE_GROUP),
-                &system_key.to_string_lossy(),
-            ])
-        });
+    // Migrate signing_key.pub to state directory
+    let legacy_key_locations = [
+        config::dirs_home().join("signing_key.pub"),
+        PathBuf::from(config::SYSTEM_STATE_DIR).join("signing_key.pub"),
+    ];
+    let state_key = PathBuf::from(config::SYSTEM_STATE_DIR).join("signing_key.pub");
+    if !state_key.exists() {
+        for key_src in &legacy_key_locations {
+            if key_src.exists() {
+                let _ = sudo(&[
+                    "cp",
+                    "-p",
+                    &key_src.to_string_lossy(),
+                    &state_key.to_string_lossy(),
+                ])
+                .and_then(|()| {
+                    sudo(&[
+                        "chown",
+                        &format!("{}:{}", SERVICE_USER, SERVICE_GROUP),
+                        &state_key.to_string_lossy(),
+                    ])
+                });
+                break;
+            }
+        }
     }
 
     match result {
         Ok(()) => SetupStep {
             name: "Config migration",
             status: StepStatus::Created,
-            message: format!("Migrated {} → {}", legacy_str, system_str),
+            message: format!("Migrated {} → {}", source_str, system_str),
         },
         Err(e) => SetupStep {
             name: "Config migration",
@@ -382,7 +420,7 @@ SupplementaryGroups=docker
 ExecStart=/usr/local/bin/nexus-link-agent
 Restart=on-failure
 RestartSec=5
-Environment=NEXUS_LINK_CONFIG=/var/lib/nexus-link/config.toml
+Environment=NEXUS_LINK_CONFIG=/etc/nexus-link/config.toml
 
 # Hardening
 ProtectHome=true
@@ -412,7 +450,7 @@ SupplementaryGroups=docker
 ExecStart=/usr/local/bin/nexus-link-service
 Restart=on-failure
 RestartSec=5
-Environment=NEXUS_LINK_CONFIG=/var/lib/nexus-link/config.toml
+Environment=NEXUS_LINK_CONFIG=/etc/nexus-link/config.toml
 
 # Hardening
 ProtectHome=true
