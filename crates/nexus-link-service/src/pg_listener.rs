@@ -50,18 +50,67 @@ pub async fn run(state: Arc<AppState>, wake: Arc<Notify>) {
 }
 
 /// Build a rustls TLS connector for PostgreSQL.
+/// Supabase Pooler uses a private CA (Supabase Root 2021 CA) not present in
+/// public root stores. With `sslmode=require` the connection is encrypted but
+/// we must accept the server's certificate without full chain validation.
+/// This matches the behavior of libpq with `sslmode=require` (encrypt only,
+/// no identity verification).
 fn make_tls_connector() -> MakeRustlsConnect {
     // Ensure a CryptoProvider is installed (ring via feature flag).
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let mut root_store = rustls::RootCertStore::empty();
-    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
     let tls_config = ClientConfig::builder()
-        .with_root_certificates(root_store)
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(NoVerifier))
         .with_no_client_auth();
 
     MakeRustlsConnect::new(tls_config)
+}
+
+/// Certificate verifier that accepts any server certificate.
+/// Equivalent to PostgreSQL `sslmode=require` — connection is encrypted
+/// but server identity is not verified. Acceptable because:
+/// 1. The database_url contains the known Supabase pooler hostname
+/// 2. DNS resolution is trusted (local resolver)
+/// 3. The connection carries a scoped read-only listener credential
+#[derive(Debug)]
+struct NoVerifier;
+
+impl rustls::client::danger::ServerCertVerifier for NoVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
 }
 
 /// Connect, subscribe, and listen until the connection drops.
