@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.6] - 2026-09-01
+
+### Security
+
+- **SEC-504 (MEDIUM): Migrated config file permissions hardened from 644 to 600.**
+  `preflight --setup` migration set `/etc/nexus-link/config.toml` to world-readable
+  (mode 644), exposing bearer tokens and database credentials to all local users.
+  Now uses mode 600 (owner-only read/write).
+- **SEC-405 (HIGH): Filesystem paths no longer leaked to remote backend.**
+  The `get_file` and `put_file` poller results included full absolute paths
+  (e.g. `/opt/dgx-llm/docker-compose.yaml`) in the JSON payload sent to the
+  Nexus API. Error messages also exposed the compose directory. Now returns
+  only filenames.
+- **SEC-502 (LOW): Doc comment example corrected.** The `Config` struct doc
+  comment showed `listen_addr = "0.0.0.0"` as example, potentially misleading
+  operators into insecure copy-paste configuration. Changed to `127.0.0.1`.
+
+### Fixed
+
+- **Dependency vulnerabilities resolved.** Updated `crossbeam-epoch` (RUSTSEC-2026-0204,
+  invalid pointer dereference), `anyhow` (RUSTSEC-2026-0190, unsound `downcast_mut`),
+  and `chacha20` (yanked version). All advisories cleared via `cargo audit`.
+
 ## [0.10.5] - 2026-09-01
 
 ### Fixed

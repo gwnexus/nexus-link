@@ -77,7 +77,7 @@ pub fn dirs_home() -> PathBuf {
 /// poll_sec = 2
 ///
 /// [service]
-/// listen_addr = "0.0.0.0"
+/// listen_addr = "127.0.0.1"
 /// port        = 8443
 ///
 /// [compose]

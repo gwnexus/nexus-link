@@ -258,7 +258,7 @@ fn migrate_legacy_config() -> SetupStep {
 
     let result = sudo(&["cp", "-p", &source_str, &system_str])
         .and_then(|()| sudo(&["chown", "root:root", &system_str]))
-        .and_then(|()| sudo(&["chmod", "644", &system_str]));
+        .and_then(|()| sudo(&["chmod", "600", &system_str]));
 
     // Migrate signing_key.pub to state directory
     let legacy_key_locations = [

@@ -145,10 +145,7 @@ fn execute_get_file(state: &Arc<AppState>) -> ComposeCommandResult {
         return ComposeCommandResult {
             status: ComposeCommandStatus::Failed,
             result: None,
-            error: Some(format!(
-                "No docker-compose.yaml found in {}",
-                compose_dir.display()
-            )),
+            error: Some("No docker-compose.yaml found in compose directory".to_string()),
         };
     };
 
@@ -175,7 +172,7 @@ fn execute_get_file(state: &Arc<AppState>) -> ComposeCommandResult {
     ComposeCommandResult {
         status: ComposeCommandStatus::Completed,
         result: Some(serde_json::json!({
-            "path": path.display().to_string(),
+            "path": path.file_name().unwrap_or_default().to_string_lossy(),
             "content": content,
             "files": extra_files,
         })),
@@ -238,7 +235,7 @@ fn execute_put_file(cmd: &ComposeCommandItem, state: &Arc<AppState>) -> ComposeC
     ComposeCommandResult {
         status: ComposeCommandStatus::Completed,
         result: Some(serde_json::json!({
-            "path": compose_path.display().to_string(),
+            "path": "docker-compose.yaml",
             "committed": false,
         })),
         error: None,
