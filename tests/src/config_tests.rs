@@ -253,6 +253,7 @@ fn test_config_node_token_accessor() {
 
 #[test]
 fn test_config_load_uses_effective_path() {
+    let _lock = crate::ENV_MUTEX.lock().unwrap();
     // Config::load() should use effective_config_path(), which respects
     // the NEXUS_LINK_CONFIG env var. Point it at a temp file and verify
     // the config loads from there.
@@ -273,7 +274,7 @@ fn test_config_load_uses_effective_path() {
     };
     config.save_to(config_path.clone()).unwrap();
 
-    // SAFETY: test runs single-threaded
+    // SAFETY: test holds ENV_MUTEX
     unsafe { std::env::set_var("NEXUS_LINK_CONFIG", config_path.to_str().unwrap()) };
     let loaded = Config::load().unwrap();
     unsafe { std::env::remove_var("NEXUS_LINK_CONFIG") };

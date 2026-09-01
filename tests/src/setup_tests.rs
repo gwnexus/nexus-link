@@ -79,8 +79,8 @@ fn test_step_status_equality() {
 
 #[test]
 fn test_config_path_resolution_env_override() {
+    let _lock = crate::ENV_MUTEX.lock().unwrap();
     // NEXUS_LINK_CONFIG env var should take priority
-    // SAFETY: test runs single-threaded, no concurrent access to env
     unsafe { std::env::set_var("NEXUS_LINK_CONFIG", "/tmp/test-nexus-link.toml") };
     let path = nexus_link_core::config::effective_config_path();
     assert_eq!(path, PathBuf::from("/tmp/test-nexus-link.toml"));
@@ -95,9 +95,9 @@ fn test_system_config_path_is_etc() {
 
 #[test]
 fn test_config_path_env_override_ignores_existing_system_paths() {
+    let _lock = crate::ENV_MUTEX.lock().unwrap();
     // When NEXUS_LINK_CONFIG is set, the result must be the env var value
     // regardless of whether /etc/ or /var/lib/ paths exist on disk.
-    // SAFETY: test runs single-threaded, no concurrent access to env
     unsafe { std::env::set_var("NEXUS_LINK_CONFIG", "/opt/custom/nexus-link.toml") };
     let path = nexus_link_core::config::effective_config_path();
     assert_eq!(path, PathBuf::from("/opt/custom/nexus-link.toml"));
@@ -109,6 +109,7 @@ fn test_config_path_env_override_ignores_existing_system_paths() {
 
 #[test]
 fn test_config_path_env_override_is_not_empty_string() {
+    let _lock = crate::ENV_MUTEX.lock().unwrap();
     // Empty NEXUS_LINK_CONFIG should still be treated as set (pathological but valid).
     unsafe { std::env::set_var("NEXUS_LINK_CONFIG", "") };
     let path = nexus_link_core::config::effective_config_path();
@@ -118,6 +119,7 @@ fn test_config_path_env_override_is_not_empty_string() {
 
 #[test]
 fn test_config_path_fallback_without_env_var() {
+    let _lock = crate::ENV_MUTEX.lock().unwrap();
     // Without env var, effective_config_path should return one of the
     // filesystem fallback paths (whichever exists, or the default).
     unsafe { std::env::remove_var("NEXUS_LINK_CONFIG") };
