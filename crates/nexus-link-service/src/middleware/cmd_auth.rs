@@ -36,6 +36,7 @@ static NONCE_CACHE: std::sync::LazyLock<Mutex<HashMap<String, DateTime<Utc>>>> =
 /// │ true                  │ Some          │ valid sig      │ 200 proceed          │
 /// │ any                   │ any           │ GET            │ skip sig check       │
 /// └───────────────────────┴───────────────┴────────────────┴──────────────────────┘
+#[allow(clippy::result_large_err)] // axum middleware requires Result<Response, Response>
 pub async fn require_cmd_auth(
     State(state): State<SharedState>,
     req: Request,
