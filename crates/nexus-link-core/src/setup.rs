@@ -288,11 +288,21 @@ fn migrate_legacy_config() -> SetupStep {
     }
 
     match result {
-        Ok(()) => SetupStep {
-            name: "Config migration",
-            status: StepStatus::Created,
-            message: format!("Migrated {} → {}", source_str, system_str),
-        },
+        Ok(()) => {
+            // Remove the legacy source to prevent stale config resolution on
+            // re-registration (see: config resolution priority bug).
+            if let Err(e) = sudo(&["rm", "-f", &source_str]) {
+                eprintln!(
+                    "Warning: migrated config but could not remove legacy source {}: {}",
+                    source_str, e
+                );
+            }
+            SetupStep {
+                name: "Config migration",
+                status: StepStatus::Created,
+                message: format!("Migrated {} -> {} (source removed)", source_str, system_str),
+            }
+        }
         Err(e) => SetupStep {
             name: "Config migration",
             status: StepStatus::Failed,

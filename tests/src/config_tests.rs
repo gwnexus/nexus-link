@@ -250,3 +250,34 @@ fn test_config_node_token_accessor() {
     // node_token() prefers api.tokens.telemetry
     assert_eq!(config.node_token(), "nxs_node_primary");
 }
+
+#[test]
+fn test_config_load_uses_effective_path() {
+    // Config::load() should use effective_config_path(), which respects
+    // the NEXUS_LINK_CONFIG env var. Point it at a temp file and verify
+    // the config loads from there.
+    let tmp = TempDir::new().unwrap();
+    let config_path = tmp.path().join("env-override-config.toml");
+
+    let config = Config {
+        node: NodeConfig {
+            node_id: "env-test-node".to_string(),
+            name: "env-test".to_string(),
+            token: "nxs_node_envtest".to_string(),
+            tags: vec![],
+        },
+        api: make_api_config("https://env.example.com"),
+        agent: AgentConfig::default(),
+        service: ServiceConfig::default(),
+        compose: ComposeConfig::default(),
+    };
+    config.save_to(config_path.clone()).unwrap();
+
+    // SAFETY: test runs single-threaded
+    unsafe { std::env::set_var("NEXUS_LINK_CONFIG", config_path.to_str().unwrap()) };
+    let loaded = Config::load().unwrap();
+    unsafe { std::env::remove_var("NEXUS_LINK_CONFIG") };
+
+    assert_eq!(loaded.node.node_id, "env-test-node");
+    assert_eq!(loaded.api.base_url, "https://env.example.com");
+}

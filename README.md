@@ -188,7 +188,14 @@ Read-only routes (GET) never require a signature.
 
 ## Configuration
 
-After registration, the node config is stored at `~/.nexus-link/config.toml`:
+After registration, the node config is stored at `/etc/nexus-link/config.toml`
+(system mode, FHS-compliant) or `~/.nexus-link/config.toml` (user mode fallback).
+
+Config resolution order:
+1. `NEXUS_LINK_CONFIG` env var or `--config <path>` flag (explicit override, no fallback)
+2. `/etc/nexus-link/config.toml` (FHS standard, preferred for system services)
+3. `/var/lib/nexus-link/config.toml` (legacy, auto-migrated by `preflight --setup`)
+4. `~/.nexus-link/config.toml` (user-mode fallback)
 
 ```toml
 [node]

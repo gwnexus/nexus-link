@@ -268,9 +268,12 @@ impl Default for ServiceConfig {
 // ---------------------------------------------------------------------------
 
 impl Config {
-    /// Load config from the effective path (env var → system → user)
+    /// Load config from the effective path (env var > system > user).
+    /// Logs the resolved path at info level for debuggability.
     pub fn load() -> anyhow::Result<Self> {
-        Self::load_from(effective_config_path())
+        let path = effective_config_path();
+        tracing::info!(config_path = %path.display(), "Config loaded from {}", path.display());
+        Self::load_from(path)
     }
 
     /// Load config from a specific path

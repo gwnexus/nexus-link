@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.5] - 2026-09-01
+
+### Fixed
+
+- **Config resolution: stale legacy config after migration.** The `preflight
+  --setup` migration step copied configs from `/var/lib/nexus-link/config.toml`
+  to `/etc/nexus-link/config.toml` but never deleted the source file. On
+  re-registration (hostname rename, token rotation), the stale legacy config
+  persisted and could shadow the new config during resolution. The migration
+  now removes the source file after a successful copy.
+- **`unregister` targeted wrong config path.** The unregister command used
+  `default_config_path()` (pointing to `~/.nexus-link/`) instead of
+  `effective_config_path()`, so it never cleaned up the config actually in use
+  when running in system mode (`/etc/nexus-link/`).
+
+### Added
+
+- **Config path logged at startup.** `Config::load()` now emits an info-level
+  log line showing the resolved config file path (e.g.
+  `Config loaded from /etc/nexus-link/config.toml`). Visible in
+  `journalctl -u nexus-link-agent` for immediate debugging.
+- **`--config <path>` flag for agent and service binaries.**
+  `nexus-link-agent --config /path/to/config.toml` and
+  `nexus-link-service --config /path/to/config.toml` now set the
+  `NEXUS_LINK_CONFIG` env var before loading, matching the existing
+  CLI `--config` flag behavior.
+- **4 new tests:** Config path env var override with nonexistent paths, empty
+  env var edge case, fallback resolution without env var, and
+  `Config::load()` integration test via env var override.
+
 ## [0.10.4] - 2026-08-10
 
 ### Fixed

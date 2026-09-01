@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use tracing::info;
 
 pub async fn execute(force: bool) -> anyhow::Result<()> {
-    let config_path = config::default_config_path();
+    let config_path = config::effective_config_path();
 
     // Check if config exists
     if !config_path.exists() {

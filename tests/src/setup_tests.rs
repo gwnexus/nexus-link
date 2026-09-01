@@ -92,3 +92,44 @@ fn test_system_config_path_is_etc() {
     let path = nexus_link_core::config::system_config_path();
     assert_eq!(path, PathBuf::from("/etc/nexus-link/config.toml"));
 }
+
+#[test]
+fn test_config_path_env_override_ignores_existing_system_paths() {
+    // When NEXUS_LINK_CONFIG is set, the result must be the env var value
+    // regardless of whether /etc/ or /var/lib/ paths exist on disk.
+    // SAFETY: test runs single-threaded, no concurrent access to env
+    unsafe { std::env::set_var("NEXUS_LINK_CONFIG", "/opt/custom/nexus-link.toml") };
+    let path = nexus_link_core::config::effective_config_path();
+    assert_eq!(path, PathBuf::from("/opt/custom/nexus-link.toml"));
+    // The env var path is returned even if the file does not exist --
+    // it is the caller's responsibility to handle missing files.
+    assert!(!path.exists());
+    unsafe { std::env::remove_var("NEXUS_LINK_CONFIG") };
+}
+
+#[test]
+fn test_config_path_env_override_is_not_empty_string() {
+    // Empty NEXUS_LINK_CONFIG should still be treated as set (pathological but valid).
+    unsafe { std::env::set_var("NEXUS_LINK_CONFIG", "") };
+    let path = nexus_link_core::config::effective_config_path();
+    assert_eq!(path, PathBuf::from(""));
+    unsafe { std::env::remove_var("NEXUS_LINK_CONFIG") };
+}
+
+#[test]
+fn test_config_path_fallback_without_env_var() {
+    // Without env var, effective_config_path should return one of the
+    // filesystem fallback paths (whichever exists, or the default).
+    unsafe { std::env::remove_var("NEXUS_LINK_CONFIG") };
+    let path = nexus_link_core::config::effective_config_path();
+    // On dev machines none of the system paths exist, so it falls back
+    // to ~/.nexus-link/config.toml
+    let default = nexus_link_core::config::default_config_path();
+    let system = nexus_link_core::config::system_config_path();
+    let legacy = PathBuf::from(SYSTEM_STATE_DIR).join("config.toml");
+    assert!(
+        path == system || path == legacy || path == default,
+        "effective_config_path returned unexpected path: {}",
+        path.display()
+    );
+}

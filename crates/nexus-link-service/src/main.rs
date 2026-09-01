@@ -21,6 +21,14 @@ use state::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // --config <path> override (sets NEXUS_LINK_CONFIG before Config::load)
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(pos) = args.iter().position(|a| a == "--config")
+        && let Some(path) = args.get(pos + 1)
+    {
+        unsafe { std::env::set_var("NEXUS_LINK_CONFIG", path) };
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::from_default_env()
