@@ -14,36 +14,101 @@ pub const SERVICE_USER: &str = "nexus-link";
 /// The group name for the nexus-link service user.
 pub const SERVICE_GROUP: &str = "nexus-link";
 
+/// Default profile name (backward compatible, resolves to config.toml)
+pub const DEFAULT_PROFILE: &str = "default";
+
+/// Env var for profile selection
+pub const PROFILE_ENV_VAR: &str = "NEXUS_LINK_PROFILE";
+
+/// Get the active profile name from NEXUS_LINK_PROFILE env var.
+/// Returns "default" if not set.
+pub fn active_profile() -> String {
+    std::env::var(PROFILE_ENV_VAR).unwrap_or_else(|_| DEFAULT_PROFILE.to_string())
+}
+
+/// Get the config filename for a given profile.
+/// "default" -> "config.toml" (backward compatible)
+/// anything else -> "config.<profile>.toml"
+pub fn config_filename_for_profile(profile: &str) -> String {
+    if profile == DEFAULT_PROFILE {
+        "config.toml".to_string()
+    } else {
+        format!("config.{}.toml", profile)
+    }
+}
+
+/// Get the state directory for a given profile.
+/// Returns /var/lib/nexus-link/<profile>/ (or /var/lib/nexus-link/ for default).
+pub fn state_dir_for_profile(profile: &str) -> PathBuf {
+    if profile == DEFAULT_PROFILE {
+        PathBuf::from(SYSTEM_STATE_DIR)
+    } else {
+        PathBuf::from(SYSTEM_STATE_DIR).join(profile)
+    }
+}
+
+/// Get the systemd service name for nexus-link-agent.
+/// "default" -> "nexus-link-agent" (backward compatible)
+/// anything else -> "nexus-link-agent@<profile>"
+pub fn systemd_agent_service_name(profile: &str) -> String {
+    if profile == DEFAULT_PROFILE {
+        "nexus-link-agent".to_string()
+    } else {
+        format!("nexus-link-agent@{}", profile)
+    }
+}
+
+/// Get the systemd service name for nexus-link-service.
+pub fn systemd_service_service_name(profile: &str) -> String {
+    if profile == DEFAULT_PROFILE {
+        "nexus-link-service".to_string()
+    } else {
+        format!("nexus-link-service@{}", profile)
+    }
+}
+
 /// Resolve the effective config path. Priority:
 /// 1. `NEXUS_LINK_CONFIG` env var (explicit override)
-/// 2. System path `/etc/nexus-link/config.toml` (FHS standard)
-/// 3. Legacy system path `/var/lib/nexus-link/config.toml` (auto-migrated)
-/// 4. User path `~/.nexus-link/config.toml` (legacy fallback)
+/// 2. System path `/etc/nexus-link/<config_file>` (FHS standard, profile-aware)
+/// 3. Legacy system path `/var/lib/nexus-link/config.toml` (default profile only)
+/// 4. User path `~/.nexus-link/config.toml` (default profile only)
+/// 5. Non-default profile: system path even if it doesn't exist yet
 pub fn effective_config_path() -> PathBuf {
-    // 1. Explicit env var override
+    // 1. Explicit env var override (absolute precedence)
     if let Ok(p) = std::env::var("NEXUS_LINK_CONFIG") {
         return PathBuf::from(p);
     }
 
+    let profile = active_profile();
+    let config_file = config_filename_for_profile(&profile);
+
     // 2. System config path (preferred for service mode)
-    let system_path = system_config_path();
+    let system_path = PathBuf::from(SYSTEM_CONFIG_DIR).join(&config_file);
     if system_path.exists() {
         return system_path;
     }
 
-    // 3. Legacy system path (pre-v0.10.2 migration path)
-    let legacy_system = PathBuf::from(SYSTEM_STATE_DIR).join("config.toml");
-    if legacy_system.exists() {
-        return legacy_system;
+    // 3. Legacy system path (pre-v0.10.2 migration path, default profile only)
+    if profile == DEFAULT_PROFILE {
+        let legacy_system = PathBuf::from(SYSTEM_STATE_DIR).join("config.toml");
+        if legacy_system.exists() {
+            return legacy_system;
+        }
     }
 
-    // 4. Legacy user path
-    default_config_path()
+    // 4. Legacy user path (default profile only)
+    if profile == DEFAULT_PROFILE {
+        return default_config_path();
+    }
+
+    // 5. Non-default profile: return system path even if it doesn't exist yet
+    system_path
 }
 
-/// System-level config path: /etc/nexus-link/config.toml
+/// System-level config path for the active profile
 pub fn system_config_path() -> PathBuf {
-    PathBuf::from(SYSTEM_CONFIG_DIR).join("config.toml")
+    let profile = active_profile();
+    PathBuf::from(SYSTEM_CONFIG_DIR).join(config_filename_for_profile(&profile))
 }
 
 /// Default config path: ~/.nexus-link/config.toml

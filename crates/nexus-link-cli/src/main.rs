@@ -27,6 +27,10 @@ struct Cli {
     /// Path to config file
     #[arg(long, global = true)]
     config: Option<String>,
+
+    /// Named profile for multi-endpoint support (e.g. staging, production)
+    #[arg(long, global = true)]
+    profile: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -173,6 +177,11 @@ async fn main() -> anyhow::Result<()> {
     if let Some(ref config_path) = cli.config {
         // SAFETY: set_var is called before any threads are spawned (single-threaded main).
         unsafe { std::env::set_var("NEXUS_LINK_CONFIG", config_path) };
+    }
+
+    // Wire global --profile flag into env var so Config::load() uses the correct profile
+    if let Some(ref profile) = cli.profile {
+        unsafe { std::env::set_var("NEXUS_LINK_PROFILE", profile) };
     }
 
     match cli.command {

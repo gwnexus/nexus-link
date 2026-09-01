@@ -1,4 +1,6 @@
-use nexus_link_core::config::{SERVICE_GROUP, SERVICE_USER, SYSTEM_CONFIG_DIR, SYSTEM_STATE_DIR};
+use nexus_link_core::config::{
+    self, DEFAULT_PROFILE, SERVICE_GROUP, SERVICE_USER, SYSTEM_CONFIG_DIR, SYSTEM_STATE_DIR,
+};
 use nexus_link_core::setup::{SetupReport, SetupStep, StepStatus};
 use std::path::PathBuf;
 
@@ -134,4 +136,104 @@ fn test_config_path_fallback_without_env_var() {
         "effective_config_path returned unexpected path: {}",
         path.display()
     );
+}
+
+// ── Profile tests ───────────────────────────────────────────────────────────
+
+#[test]
+fn test_config_filename_default_profile() {
+    assert_eq!(
+        config::config_filename_for_profile("default"),
+        "config.toml"
+    );
+}
+
+#[test]
+fn test_config_filename_named_profile() {
+    assert_eq!(
+        config::config_filename_for_profile("staging"),
+        "config.staging.toml"
+    );
+    assert_eq!(
+        config::config_filename_for_profile("production"),
+        "config.production.toml"
+    );
+}
+
+#[test]
+fn test_state_dir_default_profile() {
+    let dir = config::state_dir_for_profile("default");
+    assert_eq!(dir, PathBuf::from(SYSTEM_STATE_DIR));
+}
+
+#[test]
+fn test_state_dir_named_profile() {
+    let dir = config::state_dir_for_profile("staging");
+    assert_eq!(dir, PathBuf::from(SYSTEM_STATE_DIR).join("staging"));
+}
+
+#[test]
+fn test_systemd_service_names_default() {
+    assert_eq!(
+        config::systemd_agent_service_name("default"),
+        "nexus-link-agent"
+    );
+    assert_eq!(
+        config::systemd_service_service_name("default"),
+        "nexus-link-service"
+    );
+}
+
+#[test]
+fn test_systemd_service_names_named_profile() {
+    assert_eq!(
+        config::systemd_agent_service_name("staging"),
+        "nexus-link-agent@staging"
+    );
+    assert_eq!(
+        config::systemd_service_service_name("staging"),
+        "nexus-link-service@staging"
+    );
+}
+
+#[test]
+fn test_active_profile_default() {
+    let _lock = crate::ENV_MUTEX.lock().unwrap();
+    unsafe { std::env::remove_var("NEXUS_LINK_PROFILE") };
+    assert_eq!(config::active_profile(), DEFAULT_PROFILE);
+}
+
+#[test]
+fn test_active_profile_env_override() {
+    let _lock = crate::ENV_MUTEX.lock().unwrap();
+    unsafe { std::env::set_var("NEXUS_LINK_PROFILE", "staging") };
+    assert_eq!(config::active_profile(), "staging");
+    unsafe { std::env::remove_var("NEXUS_LINK_PROFILE") };
+}
+
+#[test]
+fn test_profile_config_path_resolution() {
+    let _lock = crate::ENV_MUTEX.lock().unwrap();
+    unsafe { std::env::remove_var("NEXUS_LINK_CONFIG") };
+    unsafe { std::env::set_var("NEXUS_LINK_PROFILE", "staging") };
+    let path = config::effective_config_path();
+    // Non-default profile should resolve to config.staging.toml under system dir
+    assert!(
+        path.to_string_lossy().contains("config.staging.toml"),
+        "Expected config.staging.toml in path, got: {}",
+        path.display()
+    );
+    unsafe { std::env::remove_var("NEXUS_LINK_PROFILE") };
+}
+
+#[test]
+fn test_nexus_link_config_env_overrides_profile() {
+    let _lock = crate::ENV_MUTEX.lock().unwrap();
+    // NEXUS_LINK_CONFIG must take precedence over NEXUS_LINK_PROFILE
+    unsafe { std::env::set_var("NEXUS_LINK_PROFILE", "staging") };
+    unsafe { std::env::set_var("NEXUS_LINK_CONFIG", "/custom/override.toml") };
+    let path = config::effective_config_path();
+    assert_eq!(path, PathBuf::from("/custom/override.toml"));
+    unsafe { std::env::remove_var("NEXUS_LINK_CONFIG") };
+    unsafe { std::env::remove_var("NEXUS_LINK_PROFILE") };
 }

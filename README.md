@@ -186,6 +186,48 @@ Read-only routes (GET) never require a signature.
 
 ---
 
+## Multi-Profile Support (v0.11.0+)
+
+A single device can register against multiple Nexus App backends (e.g.
+production + staging) using named profiles. Each profile runs as an independent
+systemd instance with its own config, tokens, and node identity.
+
+```bash
+# Register against staging
+nexus-link --profile staging register \
+  --api-url https://staging.nexus.gatewarden.eu \
+  --token <nxs_node_*> --cmd-token <nxs_cmd_*>
+
+# Start staging services
+nexus-link --profile staging agent start
+
+# Production (default profile, no --profile needed)
+nexus-link agent start
+```
+
+### Profile file layout
+
+```
+/etc/nexus-link/
+  config.toml              # default profile (production)
+  config.staging.toml      # staging profile
+
+/var/lib/nexus-link/       # default profile state
+/var/lib/nexus-link/staging/  # staging profile state
+```
+
+### Systemd services
+
+| Profile   | Agent service                        | Command service                        |
+|-----------|--------------------------------------|----------------------------------------|
+| default   | `nexus-link-agent.service`           | `nexus-link-service.service`           |
+| staging   | `nexus-link-agent@staging.service`   | `nexus-link-service@staging.service`   |
+
+**Important:** Each profile MUST use a distinct `compose.dir` and `service.port`
+to prevent command conflicts and port collisions between profiles.
+
+---
+
 ## Configuration
 
 After registration, the node config is stored at `/etc/nexus-link/config.toml`

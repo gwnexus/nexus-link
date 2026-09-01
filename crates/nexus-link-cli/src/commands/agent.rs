@@ -2,8 +2,13 @@ use nexus_link_core::config::{self, Config, SERVICE_GROUP, SERVICE_USER, SYSTEM_
 use std::path::PathBuf;
 use tracing::info;
 
-const AGENT_SERVICE_NAME: &str = "nexus-link-agent";
-const SERVICE_SERVICE_NAME: &str = "nexus-link-service";
+fn agent_service_name() -> String {
+    nexus_link_core::config::systemd_agent_service_name(&nexus_link_core::config::active_profile())
+}
+
+fn service_service_name() -> String {
+    nexus_link_core::config::systemd_service_service_name(&nexus_link_core::config::active_profile())
+}
 
 /// Detect whether we're running as root
 fn is_root() -> bool {
@@ -38,6 +43,8 @@ fn detect_systemd_mode() -> SystemdMode {
 pub async fn start() -> anyhow::Result<()> {
     let config = Config::load()?;
     let mode = detect_systemd_mode();
+    let agent_svc = agent_service_name();
+    let service_svc = service_service_name();
 
     info!(
         "Starting nexus-link agent and service (mode: {:?})...",
@@ -51,22 +58,22 @@ pub async fn start() -> anyhow::Result<()> {
     }
 
     // Check if systemd unit files exist, generate if not
-    if !systemd_unit_exists(AGENT_SERVICE_NAME, mode) {
+    if !systemd_unit_exists(&agent_svc, mode) {
         println!("Generating systemd unit files...");
         generate_systemd_units(mode)?;
         reload_systemd(mode)?;
     }
 
     // Enable and start both services
-    systemctl("enable", AGENT_SERVICE_NAME, mode)?;
-    systemctl("start", AGENT_SERVICE_NAME, mode)?;
+    systemctl("enable", &agent_svc, mode)?;
+    systemctl("start", &agent_svc, mode)?;
     println!(
         "  Agent:   started (telemetry push every {}s)",
         config.agent.push_sec
     );
 
-    systemctl("enable", SERVICE_SERVICE_NAME, mode)?;
-    systemctl("start", SERVICE_SERVICE_NAME, mode)?;
+    systemctl("enable", &service_svc, mode)?;
+    systemctl("start", &service_svc, mode)?;
     println!(
         "  Service: started (listening on {}:{})",
         config.service.listen_addr, config.service.port
@@ -107,11 +114,13 @@ pub async fn restart() -> anyhow::Result<()> {
 
     let config = Config::load()?;
     let mode = detect_systemd_mode();
+    let agent_svc = agent_service_name();
+    let service_svc = service_service_name();
 
     // Restart both services via systemctl; fall back to stop+start if the
     // service is not yet registered (restart returns an error on unknown units).
-    let agent_ok = systemctl("restart", AGENT_SERVICE_NAME, mode).is_ok();
-    let service_ok = systemctl("restart", SERVICE_SERVICE_NAME, mode).is_ok();
+    let agent_ok = systemctl("restart", &agent_svc, mode).is_ok();
+    let service_ok = systemctl("restart", &service_svc, mode).is_ok();
 
     if agent_ok {
         println!(
@@ -119,8 +128,8 @@ pub async fn restart() -> anyhow::Result<()> {
             config.agent.push_sec
         );
     } else {
-        println!("  Agent:   not running as a service — attempting start...");
-        systemctl("start", AGENT_SERVICE_NAME, mode).ok();
+        println!("  Agent:   not running as a service -- attempting start...");
+        systemctl("start", &agent_svc, mode).ok();
     }
 
     if service_ok {
@@ -129,8 +138,8 @@ pub async fn restart() -> anyhow::Result<()> {
             config.service.listen_addr, config.service.port
         );
     } else {
-        println!("  Service: not running as a service — attempting start...");
-        systemctl("start", SERVICE_SERVICE_NAME, mode).ok();
+        println!("  Service: not running as a service -- attempting start...");
+        systemctl("start", &service_svc, mode).ok();
     }
 
     println!();
@@ -141,14 +150,16 @@ pub async fn restart() -> anyhow::Result<()> {
 
 pub async fn stop() -> anyhow::Result<()> {
     let mode = detect_systemd_mode();
+    let agent_svc = agent_service_name();
+    let service_svc = service_service_name();
     let mut stopped = false;
 
-    if systemctl("stop", AGENT_SERVICE_NAME, mode).is_ok() {
+    if systemctl("stop", &agent_svc, mode).is_ok() {
         println!("  Agent:   stopped");
         stopped = true;
     }
 
-    if systemctl("stop", SERVICE_SERVICE_NAME, mode).is_ok() {
+    if systemctl("stop", &service_svc, mode).is_ok() {
         println!("  Service: stopped");
         stopped = true;
     }
@@ -169,11 +180,13 @@ pub async fn stop() -> anyhow::Result<()> {
 
 pub async fn logs(tail: u32) -> anyhow::Result<()> {
     let mode = detect_systemd_mode();
+    let agent_svc = agent_service_name();
+    let service_svc = service_service_name();
     let mut args = vec![
         "-u".to_string(),
-        AGENT_SERVICE_NAME.to_string(),
+        agent_svc.clone(),
         "-u".to_string(),
-        SERVICE_SERVICE_NAME.to_string(),
+        service_svc.clone(),
         "-n".to_string(),
         tail.to_string(),
         "--no-pager".to_string(),
@@ -203,7 +216,7 @@ pub async fn logs(tail: u32) -> anyhow::Result<()> {
             println!("journalctl not available. Try:");
             println!(
                 "  journalctl{} -u {} -n {} --no-pager",
-                flag, AGENT_SERVICE_NAME, tail
+                flag, agent_svc, tail
             );
         }
     }
@@ -241,6 +254,14 @@ fn generate_systemd_units(mode: SystemdMode) -> anyhow::Result<()> {
         .unwrap_or(&PathBuf::from(SYSTEM_CONFIG_DIR))
         .display()
         .to_string();
+    let agent_svc = agent_service_name();
+    let service_svc = service_service_name();
+    let profile = nexus_link_core::config::active_profile();
+    let profile_suffix = if profile == nexus_link_core::config::DEFAULT_PROFILE {
+        String::new()
+    } else {
+        format!(" ({})", profile)
+    };
 
     // Determine whether we use the dedicated system user or the current user
     let use_dedicated_user = std::path::Path::new(SYSTEM_CONFIG_DIR).exists();
@@ -300,7 +321,7 @@ RestrictSUIDSGID=yes",
     // Agent unit
     let agent_unit = format!(
         r#"[Unit]
-Description=Nexus Link Telemetry Agent
+Description=Nexus Link Telemetry Agent{profile_suffix}
 Documentation=https://github.com/gwnexus/nexus-link
 After=network-online.target docker.service
 Wants=network-online.target
@@ -318,6 +339,7 @@ WorkingDirectory={home}
 [Install]
 {install}
 "#,
+        profile_suffix = profile_suffix,
         bin = nexus_link_bin.display(),
         home = working_dir,
         user = user_directive,
@@ -328,7 +350,7 @@ WorkingDirectory={home}
     // Service unit
     let service_unit = format!(
         r#"[Unit]
-Description=Nexus Link Command Service
+Description=Nexus Link Command Service{profile_suffix}
 Documentation=https://github.com/gwnexus/nexus-link
 After=network-online.target
 Wants=network-online.target
@@ -346,6 +368,7 @@ WorkingDirectory={home}
 [Install]
 {install}
 "#,
+        profile_suffix = profile_suffix,
         bin = nexus_link_service_bin.display(),
         home = working_dir,
         user = user_directive,
@@ -353,8 +376,8 @@ WorkingDirectory={home}
         install = install_target,
     );
 
-    let agent_path = systemd_unit_path(AGENT_SERVICE_NAME, mode);
-    let service_path = systemd_unit_path(SERVICE_SERVICE_NAME, mode);
+    let agent_path = systemd_unit_path(&agent_svc, mode);
+    let service_path = systemd_unit_path(&service_svc, mode);
 
     // Ensure directory exists for user units
     if mode == SystemdMode::User

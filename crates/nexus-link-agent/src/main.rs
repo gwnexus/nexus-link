@@ -17,6 +17,12 @@ async fn main() -> anyhow::Result<()> {
     {
         unsafe { std::env::set_var("NEXUS_LINK_CONFIG", path) };
     }
+    // --profile <name> override (sets NEXUS_LINK_PROFILE before Config::load)
+    if let Some(pos) = args.iter().position(|a| a == "--profile")
+        && let Some(profile) = args.get(pos + 1)
+    {
+        unsafe { std::env::set_var("NEXUS_LINK_PROFILE", profile) };
+    }
 
     tracing_subscriber::fmt()
         .with_env_filter(

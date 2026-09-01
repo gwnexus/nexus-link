@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-09-01
+
+### Added
+
+- **Multi-profile support (ADR-0005).** A single physical device can now register
+  against multiple independent Nexus App backends simultaneously (e.g. production
+  + staging). Each profile runs as an isolated systemd instance with its own
+  config, tokens, node identity, and state directory.
+
+- **`--profile <name>` flag** on all CLI commands, `nexus-link-agent`, and
+  `nexus-link-service`. Sets `NEXUS_LINK_PROFILE` env var before config loading.
+  Omitting `--profile` uses the `default` profile (backward compatible).
+
+- **Profile-aware config resolution.** Config files follow the pattern
+  `config.<profile>.toml` (e.g. `config.staging.toml`). The `default` profile
+  resolves to `config.toml` for backward compatibility. Full resolution order:
+  1. `NEXUS_LINK_CONFIG` env var (absolute precedence)
+  2. `/etc/nexus-link/config.<profile>.toml`
+  3. Legacy paths (default profile only)
+  4. `~/.nexus-link/config.toml` (default profile only)
+
+- **Profile-aware systemd service names.** Non-default profiles generate
+  template-style service names: `nexus-link-agent@staging.service`. The default
+  profile keeps the original names for backward compatibility.
+
+- **Profile-aware state directories.** Non-default profiles use
+  `/var/lib/nexus-link/<profile>/` for signing keys and transient state.
+
+- **10 new tests** for profile config resolution, service naming, state directory
+  isolation, and env var precedence. Total: 68 tests.
+
+### Usage
+
+```bash
+# Register against staging backend
+nexus-link --profile staging register \
+  --api-url https://staging.nexus.gatewarden.eu \
+  --token <nxs_node_*> --cmd-token <nxs_cmd_*>
+
+# Start staging agent and service
+nexus-link --profile staging agent start
+
+# View staging logs
+nexus-link --profile staging agent logs
+
+# Production continues to work without --profile
+nexus-link agent start
+```
+
 ## [0.10.6] - 2026-09-01
 
 ### Security
