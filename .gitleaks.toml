@@ -1,0 +1,12 @@
+# Gitleaks configuration for nexus-link
+# Scans commits for leaked secrets before they reach the repository.
+
+title = "nexus-link gitleaks config"
+
+[allowlist]
+  description = "Global allowlist"
+  regexTarget = "match"
+  regexes = [
+    '''NEXT_PUBLIC_SENTRY_DSN''',
+    '''SENTRY_DSN''',
+  ]

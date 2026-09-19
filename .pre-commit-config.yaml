@@ -55,6 +55,17 @@ repos:
         name: enforce LF line endings
 
   # ---------------------------------------------------------------------------
+  # Secrets scanning
+  # ---------------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks (secret scan)
+        language: system
+        entry: gitleaks git --pre-commit --redact --staged --verbose
+        pass_filenames: false
+
+  # ---------------------------------------------------------------------------
   # Rust — local hooks (toolchain from rust-toolchain.toml)
   #
   # RUSTFLAGS="" is set explicitly in every Rust hook to prevent the devbox
