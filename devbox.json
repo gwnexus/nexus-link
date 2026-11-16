@@ -1,17 +1,11 @@
 {
   "env": {
-    "HEADROOM_MODE": "transform",
     "RUSTC_WRAPPER": "sccache",
-    "HEADROOM_DEBUG": "false",
     "RUST_BACKTRACE": "1",
     "CARGO_TERM_COLOR": "always",
     "CARGO_INCREMENTAL": "0",
     "NEXT_TELEMETRY_DISABLED": "1",
-    "HEADROOM_REQUIRE_PREFLIGHT": "true",
     "POWERLEVEL9K_INSTANT_PROMPT": "quiet",
-    "HEADROOM_RETRIEVAL_MAX_CHARS": "24000",
-    "HEADROOM_RETRIEVAL_MAX_LINES": "200",
-    "HEADROOM_ALLOW_FULL_RETRIEVAL": "false",
     "C_DBX_META_TEAM": "NEXUS-Labs",
     "C_DBX_META_TEAM_ID": "NEXUS-Labs-DD",
     "C_DBX_META_PROJECT_ID": "NEXUS-LINK",
@@ -33,12 +27,6 @@
         "cargo fmt --all",
         "cargo clippy --all -- -D warnings"
       ],
-      "tmux-2w": [
-        "bash scripts/devbox/dbx_tmux_2w.sh"
-      ],
-      "tmux-3w": [
-        "bash scripts/devbox/dbx_tmux_3w.sh"
-      ],
       "sec-scan": [
         "bash scripts/devbox/ops/sec-scan.sh"
       ],
@@ -50,6 +38,7 @@
       ]
     },
     "init_hook": [
+      "_penv=\"${DEVBOX_PROJECT_ROOT:-.}/.nexus/plugin.env\"; if [ -f \"$_penv\" ]; then if grep -qF '# Sourced by the devbox init hook' \"$_penv\"; then set -a; . \"$_penv\"; set +a; else echo \"plugin.env not loaded: written by an older nexus CLI; run nexus upgrade, then nexus pull\" >&2; fi; fi; unset _penv",
       "scripts/devbox/dbx_init.sh"
     ]
   },
@@ -61,20 +50,21 @@
     "fzf": "0.54.0",
     "git": "latest",
     "glow": "1.5.1",
-    "tmux": "3.4",
-    "tmuxp": "1.47.0",
     "rustup": "latest",
     "sqlite": "latest",
     "lazygit": "0.43.1",
     "ripgrep": "14.1.0",
     "sccache": "latest",
-    "gitleaks": "latest",
+    "gitleaks": "8.30.1",
     "git-cliff": "latest",
     "cargo-deny": "latest",
     "commitizen": "3.29.1",
     "pre-commit": "3.7.1",
     "cargo-audit": "latest",
     "cargo-nextest": "latest",
-    "rust-analyzer": "latest"
+    "rust-analyzer": "latest",
+    "zellij": "0.45.0",
+    "ccusage": "20.0.17",
+    "nodejs_22": "latest"
   }
 }
