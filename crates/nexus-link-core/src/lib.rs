@@ -1,5 +1,6 @@
 pub mod config;
 pub mod error;
+pub mod heartbeat;
 pub mod network;
 pub mod preflight;
 pub mod setup;

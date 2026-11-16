@@ -51,6 +51,14 @@ pub async fn show() -> anyhow::Result<()> {
     println!("  [agent]");
     println!("  push_sec         = {}", config.agent.push_sec);
     println!("  poll_sec         = {}", config.agent.poll_sec);
+    println!("  heartbeat_sec    = {}", config.agent.heartbeat_sec);
+    match &config.agent.models_url {
+        Some(u) => println!("  models_url       = {}", u),
+        None => println!("  models_url       = (not configured; no model inventory)"),
+    }
+    if config.agent.models_api_key.is_some() {
+        println!("  models_api_key   = (set)");
+    }
     println!();
     println!("  [service]");
     println!("  listen_addr      = {}", config.service.listen_addr);
@@ -105,6 +113,34 @@ pub async fn set(key: String, value: String) -> anyhow::Result<()> {
             }
             config.agent.poll_sec = secs;
             println!("  agent.poll_sec = {}", secs);
+        }
+        "agent.heartbeat_sec" | "heartbeat_sec" => {
+            let secs: u64 = value
+                .parse()
+                .map_err(|_| anyhow::anyhow!("Invalid value: expected integer (seconds)"))?;
+            if !(1..=120).contains(&secs) {
+                anyhow::bail!(
+                    "Heartbeat interval must be 1-120 seconds (hub marks nodes offline after 5 minutes)"
+                );
+            }
+            config.agent.heartbeat_sec = secs;
+            println!("  agent.heartbeat_sec = {}", secs);
+        }
+        "agent.models_url" | "models_url" => {
+            if value.is_empty() {
+                config.agent.models_url = None;
+                println!("  agent.models_url cleared (no model inventory)");
+            } else {
+                if !(value.starts_with("http://") || value.starts_with("https://")) {
+                    anyhow::bail!("models_url must start with http:// or https://");
+                }
+                config.agent.models_url = Some(value.clone());
+                println!("  agent.models_url = {}", value);
+            }
+        }
+        "agent.models_api_key" | "models_api_key" => {
+            config.agent.models_api_key = if value.is_empty() { None } else { Some(value) };
+            println!("  agent.models_api_key updated");
         }
         "api.tokens.telemetry" | "telemetry_token" => {
             config.api.tokens.telemetry = if value.is_empty() {
@@ -199,6 +235,7 @@ pub async fn set(key: String, value: String) -> anyhow::Result<()> {
             anyhow::bail!(
                 "Unknown config key: '{}'\n\nAvailable keys:\n  \
                  api_url, agent.push_sec, agent.poll_sec,\n  \
+                 agent.heartbeat_sec, agent.models_url, agent.models_api_key,\n  \
                  api.tokens.telemetry, api.tokens.command,\n  \
                  listen_addr, port, name, tags,\n  \
                  compose_dir, compose.cmd_token, compose.signing_public_key,\n  \
@@ -223,6 +260,11 @@ pub async fn get(key: String) -> anyhow::Result<()> {
             config.agent.push_sec.to_string()
         }
         "agent.poll_sec" | "poll_sec" => config.agent.poll_sec.to_string(),
+        "agent.heartbeat_sec" | "heartbeat_sec" => config.agent.heartbeat_sec.to_string(),
+        "agent.models_url" | "models_url" => config
+            .agent
+            .models_url
+            .unwrap_or_else(|| "(not configured)".to_string()),
         "api.tokens.telemetry" | "telemetry_token" => config
             .api
             .tokens
@@ -259,6 +301,7 @@ pub async fn get(key: String) -> anyhow::Result<()> {
             anyhow::bail!(
                 "Unknown config key: '{}'\n\nAvailable keys:\n  \
                  api_url, agent.push_sec, agent.poll_sec,\n  \
+                 agent.heartbeat_sec, agent.models_url,\n  \
                  api.tokens.telemetry, api.tokens.command,\n  \
                  listen_addr, port, name, node_id, tags, token,\n  \
                  compose_dir, compose.cmd_token, compose.signing_public_key,\n  \
