@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Versioning
+
+Since 0.21.0 the `MAJOR.MINOR` of nexus-link follows the Nexus Hub release line
+it is built against (ADR-0006): nexus-link `0.21.x` targets Nexus Hub `0.21.x`.
+`PATCH` numbers are independent of the hub. The jump from 0.11.0 to 0.21.0 is
+this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
+0.11.0 used independent numbering.
+
+## [0.21.0] - 2026-11-16
+
+Requires Nexus Hub >= 0.21.0 for the model inventory; older hubs ignore the new
+`models` field.
+
+### Added
+
+- **Periodic online heartbeat.** `nexus-link-agent` now sends
+  `POST /api/nodes/{id}/heartbeat` with `status: online` every
+  `agent.heartbeat_sec` seconds (default 60), independent of the telemetry
+  push. The dashboard marks nodes offline after five minutes without a
+  heartbeat; until now only `nexus-link refresh` sent one.
+- **Served-model inventory in the heartbeat (`models`).** When
+  `agent.models_url` points to the node's local OpenAI-compatible runtime
+  (LiteLLM or vLLM), the agent reads `GET /v1/models` on the node and reports
+  each model as an id string or `{ id, max_model_len }`. At most 50 entries;
+  invalid and duplicate ids are dropped. If the runtime cannot be queried the
+  field is omitted, so the hub keeps the last known inventory. The response's
+  `models_recorded` count is logged. Requested by the hub for BYOHW gateway
+  suggestions (Dispatch 06d00498).
+- **Config keys** `agent.heartbeat_sec` (1 to 120), `agent.models_url` and
+  `agent.models_api_key` (optional local runtime key, never sent to the
+  backend) in `config show/set/get`.
+- `nexus_link_core::heartbeat`: heartbeat payload, model list parser and id
+  validation, with 13 new tests plus config default and round-trip tests.
+
+### Changed
+
+- **Version alignment with Nexus Hub (ADR-0006).** Version jumps from 0.11.0
+  to 0.21.0; see [Versioning](#versioning).
+- **Security tooling:** gitleaks secret scan added to the pre-commit framework;
+  `devbox` init verifies that gitleaks and the pre-commit hooks are installed.
+- README: versioning and hub compatibility table, `[agent]` config section
+  (replaces the outdated `api.push_interval_secs` example), heartbeat and model
+  inventory documentation.
+- CHANGELOG: restored the missing 0.8.3 and 0.8.4 headings (their entries had
+  been merged into 0.8.5) and added the missing 0.8.9 entry.
+
 ## [0.11.0] - 2026-09-01
 
 ### Added
@@ -272,6 +318,23 @@ systemd units. No re-registration required.
   `tokio::select!` over sleep + wake signal, enabling instant response to
   PG NOTIFY events.
 
+## [0.8.9] - 2026-07-29
+
+### Fixed
+
+- **Security:** findings SEC-001 to SEC-009 from an OWASP-based audit:
+  - 0600/0700 permissions on `config.toml` and its directory.
+  - Startup warning when listening on a non-localhost address without TLS.
+  - Constant-time token hash comparison (`subtle::ConstantTimeEq`).
+  - Token hashes pre-computed at startup; raw tokens no longer kept in the
+    service state.
+  - Nonce replay cache rejects duplicate signed requests.
+  - Startup warning when `require_signatures = false` with the command
+    channel active.
+  - 30 s timeout on the telemetry push HTTP client.
+  - `docker compose` output truncated to 8 KiB before it is sent to the backend.
+  - Git commit messages sanitized (200 characters, control characters stripped).
+
 ## [0.8.8] - 2026-06-30
 
 ### Added
@@ -327,7 +390,14 @@ systemd units. No re-registration required.
   Respects user vs. system systemd mode (same detection logic as
   `agent start` / `agent stop`).
 
+## [0.8.4] - 2026-06-25
 
+### Added
+
+- **Command queue poll loop (ADR-0049 reverse agent):** `nexus-link-service`
+  polls the backend for pending commands and executes them locally
+  (`get_file`, `put_file`, `activate`, `logs_snapshot`), so the backend never
+  needs inbound access to the node.
 
 ### Changed
 
@@ -367,7 +437,7 @@ systemd units. No re-registration required.
   resolve the effective token from the new location with fallback to the
   legacy fields.
 
-
+## [0.8.3] - 2026-06-25
 
 ### Fixed
 - `nexus-link config set compose.signing_public_key` was rejected with
