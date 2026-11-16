@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use nexus_link_core::config::Config;
+use nexus_link_core::heartbeat::HEARTBEAT_SEC_RANGE;
 use tokio::signal;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
@@ -37,6 +38,17 @@ async fn main() -> anyhow::Result<()> {
     info!("nexus-link-agent starting...");
 
     let config = Config::load()?;
+    // Validated here, not in Config::load, so `nexus-link config set` can
+    // still open and repair a file with an invalid value.
+    if !HEARTBEAT_SEC_RANGE.contains(&config.agent.heartbeat_sec) {
+        anyhow::bail!(
+            "agent.heartbeat_sec = {} is out of range ({}-{} seconds); fix it with \
+             `nexus-link config set agent.heartbeat_sec <secs>`",
+            config.agent.heartbeat_sec,
+            HEARTBEAT_SEC_RANGE.start(),
+            HEARTBEAT_SEC_RANGE.end()
+        );
+    }
     let interval = Duration::from_secs(config.agent.push_sec);
     let heartbeat_interval = Duration::from_secs(config.agent.heartbeat_sec);
 

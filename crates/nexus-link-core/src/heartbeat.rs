@@ -21,6 +21,11 @@ pub const MAX_MODELS: usize = 50;
 /// Maximum length of a model id accepted by the hub.
 pub const MAX_MODEL_ID_LEN: usize = 200;
 
+/// Allowed heartbeat interval in seconds. The hub marks a node offline after
+/// five minutes without a heartbeat, so the upper bound leaves room for
+/// missed beats.
+pub const HEARTBEAT_SEC_RANGE: std::ops::RangeInclusive<u64> = 1..=120;
+
 /// One served model as reported in the heartbeat.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]

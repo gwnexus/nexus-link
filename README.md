@@ -269,7 +269,7 @@ push_sec      = 6                        # telemetry push interval
 poll_sec      = 2                        # command queue poll interval
 heartbeat_sec = 60                       # online heartbeat interval (max 120)
 models_url    = "http://127.0.0.1:4000"  # optional: local LiteLLM/vLLM runtime
-# models_api_key = "<local key>"         # optional: only if /v1/models needs auth
+# models_api_key: optional local key, only if /v1/models needs auth (config set agent.models_api_key)
 
 [service]
 listen_addr = "0.0.0.0"
@@ -317,7 +317,7 @@ When `agent.models_url` points to the node's local OpenAI-compatible runtime
 
 ```bash
 nexus-link config set agent.models_url http://127.0.0.1:4000   # enable inventory
-nexus-link config set agent.models_api_key <local-key>         # if the runtime requires auth
+nexus-link config set agent.models_api_key '<local-key>'       # if the runtime requires auth
 nexus-link config set agent.heartbeat_sec 60                   # 1 to 120 seconds
 nexus-link agent restart                                       # apply
 ```

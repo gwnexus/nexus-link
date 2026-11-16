@@ -1,4 +1,5 @@
 use nexus_link_core::config::{self, Config, TokenEntry, dirs_home};
+use nexus_link_core::heartbeat::HEARTBEAT_SEC_RANGE;
 
 pub async fn show() -> anyhow::Result<()> {
     let config_path = config::default_config_path();
@@ -118,9 +119,11 @@ pub async fn set(key: String, value: String) -> anyhow::Result<()> {
             let secs: u64 = value
                 .parse()
                 .map_err(|_| anyhow::anyhow!("Invalid value: expected integer (seconds)"))?;
-            if !(1..=120).contains(&secs) {
+            if !HEARTBEAT_SEC_RANGE.contains(&secs) {
                 anyhow::bail!(
-                    "Heartbeat interval must be 1-120 seconds (hub marks nodes offline after 5 minutes)"
+                    "Heartbeat interval must be {}-{} seconds (hub marks nodes offline after 5 minutes)",
+                    HEARTBEAT_SEC_RANGE.start(),
+                    HEARTBEAT_SEC_RANGE.end()
                 );
             }
             config.agent.heartbeat_sec = secs;
