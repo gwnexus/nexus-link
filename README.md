@@ -10,6 +10,21 @@ Connects on-premise AI hardware nodes (NVIDIA DGX Spark, A100, H100) to the
 Nexus backend: live telemetry push and remote compose management — without
 requiring inbound network access into your infrastructure.
 
+## Versioning and Nexus Hub compatibility
+
+Since v0.21.0 the nexus-link version follows the Nexus Hub release line it is
+built against (ADR-0006):
+
+- `MAJOR.MINOR` equals the hub release line: nexus-link `0.21.x` targets Nexus Hub `0.21.x`.
+- `PATCH` is independent: nexus-link `0.21.3` does not imply hub `0.21.3`.
+- nexus-link `X.Y.z` requires Nexus Hub `>= X.Y.0` for its full feature set. New
+  payload fields are additive, so older hubs ignore what they do not know.
+
+| nexus-link | Nexus Hub | Notes |
+|---|---|---|
+| 0.21.x | >= 0.21.0 | Heartbeat with served-model inventory (`models`) |
+| 0.7.0 to 0.11.0 | any (pre-alignment) | Independent numbering before ADR-0006 |
+
 ## Install
 
 ### One-liner (recommended)
@@ -33,7 +48,7 @@ Requires Rust >= 1.85 (2024 edition).
 ### Pin a specific version
 
 ```bash
-NEXUS_LINK_VERSION=v0.8.2 curl -fsSL https://nexus.gatewarden.eu/install-link.sh | bash
+NEXUS_LINK_VERSION=v0.21.0 curl -fsSL https://nexus.gatewarden.eu/install-link.sh | bash
 ```
 
 ---
@@ -248,7 +263,13 @@ token   = "nxs_node_..."        # telemetry credential
 [api]
 base_url         = "https://nexus.gatewarden.eu"
 database_url     = "postgresql://nexus_link_listener.<ref>:<password>@<pooler-host>:5432/postgres?sslmode=require"
-push_interval_secs = 10
+
+[agent]
+push_sec      = 6                        # telemetry push interval
+poll_sec      = 2                        # command queue poll interval
+heartbeat_sec = 60                       # online heartbeat interval (max 120)
+models_url    = "http://127.0.0.1:4000"  # optional: local LiteLLM/vLLM runtime
+# models_api_key: optional local key, only if /v1/models needs auth (config set agent.models_api_key)
 
 [service]
 listen_addr = "0.0.0.0"
@@ -270,6 +291,35 @@ nexus-link config set compose.dir /opt/my-stack          # change compose root
 nexus-link config set compose.require_signatures true     # enable Ed25519
 nexus-link config get node.node_id                        # read a single value
 nexus-link config path                                    # show config file path
+```
+
+### Heartbeat and model inventory (v0.21.0+)
+
+`nexus-link-agent` sends an `online` heartbeat every `agent.heartbeat_sec`
+seconds (default 60) to `POST /api/nodes/{id}/heartbeat`. The Nexus dashboard
+shows a node as offline after five minutes without a heartbeat, so the
+interval is capped at 120 seconds.
+
+When `agent.models_url` points to the node's local OpenAI-compatible runtime
+(LiteLLM or vLLM), the heartbeat also reports the models it serves, read from
+`GET <models_url>/v1/models` on the node itself:
+
+```json
+{ "status": "online", "models": ["nexus-coder-long", { "id": "nexus-review-local", "max_model_len": 131072 }] }
+```
+
+- Ids are exactly what clients send as `model` (LiteLLM: the aliases);
+  `max_model_len` is included when the runtime reports it (vLLM).
+- At most 50 entries; ids outside `[A-Za-z0-9._:/@+-]{1,200}` and duplicates are dropped.
+- If the runtime cannot be queried, `models` is omitted, so the hub keeps the
+  last known inventory. An empty list means the runtime serves nothing.
+- `models_url` and `models_api_key` never leave the device.
+
+```bash
+nexus-link config set agent.models_url http://127.0.0.1:4000   # enable inventory
+nexus-link config set agent.models_api_key '<local-key>'       # if the runtime requires auth
+nexus-link config set agent.heartbeat_sec 60                   # 1 to 120 seconds
+nexus-link agent restart                                       # apply
 ```
 
 ---
@@ -451,7 +501,7 @@ Registration includes an automatic preflight check:
 docker pull ghcr.io/gwnexus/nexus-link/nexus-link-service:latest
 
 # Pin to a specific version
-docker pull ghcr.io/gwnexus/nexus-link/nexus-link-service:0.8.2
+docker pull ghcr.io/gwnexus/nexus-link/nexus-link-service:0.21.0
 ```
 
 ---

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # -------------------------------------------------------------------
-# scripts/devbox/lib/common.sh — Shared library for devbox scripts
+# scripts/devbox/lib/common.sh: Shared library for devbox scripts
 # @version 3.0.0
 # -------------------------------------------------------------------
 # Source this file; do NOT execute directly.
@@ -36,9 +36,9 @@ fi
 
 dbx_icon() {
   case "${DBX_ICON_SET}:${1}" in
-    ascii:ok)   printf "OK"  ;; ascii:fail) printf "ERR" ;; ascii:warn) printf "WRN" ;;
-    ticks:ok)   printf "✓"   ;; ticks:fail) printf "✗"   ;; ticks:warn) printf "⚠"   ;;
-    blocks:ok)  printf "■"   ;; blocks:fail)printf "■"   ;; blocks:warn)printf "■"   ;;
+    ascii:ok)   printf "OK"  ;; ascii:fail) printf "ERR" ;; ascii:warn) printf "WRN" ;; ascii:info) printf "%s" "--" ;;
+    ticks:ok)   printf "✓"   ;; ticks:fail) printf "✗"   ;; ticks:warn) printf "⚠"   ;; ticks:info) printf "·"   ;;
+    blocks:ok)  printf "■"   ;; blocks:fail)printf "■"   ;; blocks:warn)printf "■"   ;; blocks:info)printf "□"   ;;
     *)          printf "%s" "$1" ;;
   esac
 }
@@ -80,6 +80,46 @@ dbx_load_os_override() {
     # shellcheck source=/dev/null
     source "${override_path}"
   fi
+}
+
+# -------------------------------------------------------------------
+# Project checks: every init/checks.d/*.sh in name order, on every OS,
+# after the OS override and before the status matrix. A check can add
+# rows with _record, e.g. a language toolchain the generator does not
+# know (Rust, Go, ...). These files belong to the project, not to the
+# generator.
+# -------------------------------------------------------------------
+dbx_load_project_checks() {
+  local checks_dir="${DBX_SCRIPTS_ROOT}/init/checks.d" check
+  [[ -d "${checks_dir}" ]] || return 0
+  for check in "${checks_dir}"/*.sh; do
+    [[ -f "${check}" ]] || continue
+    # shellcheck source=/dev/null
+    source "${check}"
+  done
+  return 0
+}
+
+# -------------------------------------------------------------------
+# Machine-local overlay: DBX_OVERLAY_DIR names a directory outside
+# version control (exported by the machine-local init/local.sh layer).
+# Its init.sh and checks.d/*.sh are sourced like the project checks and
+# can add rows with _record. Silent no-op when the variable is unset or
+# the directory is missing.
+# -------------------------------------------------------------------
+dbx_load_overlay() {
+  local overlay_dir="${DBX_OVERLAY_DIR:-}" check
+  [[ -n "${overlay_dir}" && -d "${overlay_dir}" ]] || return 0
+  if [[ -f "${overlay_dir}/init.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "${overlay_dir}/init.sh"
+  fi
+  for check in "${overlay_dir}"/checks.d/*.sh; do
+    [[ -f "${check}" ]] || continue
+    # shellcheck source=/dev/null
+    source "${check}"
+  done
+  return 0
 }
 
 # -------------------------------------------------------------------

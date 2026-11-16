@@ -8,6 +8,8 @@ mod config_tests;
 #[cfg(test)]
 mod error_tests;
 #[cfg(test)]
+mod heartbeat_tests;
+#[cfg(test)]
 mod preflight_tests;
 #[cfg(test)]
 mod setup_tests;

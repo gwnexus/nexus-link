@@ -34,6 +34,7 @@ fn test_config_save_and_load() {
         agent: AgentConfig {
             push_sec: 30,
             poll_sec: 2,
+            ..AgentConfig::default()
         },
         service: ServiceConfig::default(),
         compose: ComposeConfig::default(),
@@ -62,6 +63,48 @@ fn test_config_default_agent() {
     let agent = AgentConfig::default();
     assert_eq!(agent.push_sec, 6);
     assert_eq!(agent.poll_sec, 2);
+    assert_eq!(agent.heartbeat_sec, 60);
+    assert!(agent.models_url.is_none());
+    assert!(agent.models_api_key.is_none());
+}
+
+#[test]
+fn test_config_agent_models_roundtrip() {
+    // models_url / models_api_key / heartbeat_sec survive save + load,
+    // and a pre-0.21.0 [agent] section without them still loads with defaults.
+    let tmp = TempDir::new().unwrap();
+    let config_path = tmp.path().join("config.toml");
+
+    let old_toml = r#"
+[node]
+node_id = "n1"
+name    = "spark"
+token   = "nxs_node_x"
+
+[api]
+base_url = "https://nexus.gatewarden.eu"
+
+[agent]
+push_sec = 6
+poll_sec = 2
+"#;
+    std::fs::write(&config_path, old_toml).unwrap();
+    let mut loaded = Config::load_from(config_path.clone()).unwrap();
+    assert_eq!(loaded.agent.heartbeat_sec, 60);
+    assert!(loaded.agent.models_url.is_none());
+
+    loaded.agent.heartbeat_sec = 30;
+    loaded.agent.models_url = Some("http://127.0.0.1:4000".to_string());
+    loaded.agent.models_api_key = Some("local-key".to_string());
+    loaded.save_to(config_path.clone()).unwrap();
+
+    let reloaded = Config::load_from(config_path).unwrap();
+    assert_eq!(reloaded.agent.heartbeat_sec, 30);
+    assert_eq!(
+        reloaded.agent.models_url.as_deref(),
+        Some("http://127.0.0.1:4000")
+    );
+    assert_eq!(reloaded.agent.models_api_key.as_deref(), Some("local-key"));
 }
 
 #[test]
@@ -93,6 +136,7 @@ fn test_config_save_creates_directory() {
         agent: AgentConfig {
             push_sec: 60,
             poll_sec: 2,
+            ..AgentConfig::default()
         },
         service: ServiceConfig::default(),
         compose: ComposeConfig::default(),
@@ -118,6 +162,7 @@ fn test_config_roundtrip_with_custom_service() {
         agent: AgentConfig {
             push_sec: 15,
             poll_sec: 3,
+            ..AgentConfig::default()
         },
         service: ServiceConfig {
             listen_addr: "127.0.0.1".to_string(),

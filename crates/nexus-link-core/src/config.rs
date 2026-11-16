@@ -140,6 +140,8 @@ pub fn dirs_home() -> PathBuf {
 /// [agent]
 /// push_sec = 6
 /// poll_sec = 2
+/// heartbeat_sec = 60
+/// models_url = "http://127.0.0.1:4000"   # optional, local runtime
 ///
 /// [service]
 /// listen_addr = "127.0.0.1"
@@ -229,6 +231,25 @@ pub struct AgentConfig {
     /// Default: 2
     #[serde(default = "default_poll_sec")]
     pub poll_sec: u64,
+
+    /// Online heartbeat interval in seconds (nexus-link-agent).
+    /// Must stay well below the hub's 5-minute offline threshold.
+    /// Default: 60
+    #[serde(default = "default_heartbeat_sec")]
+    pub heartbeat_sec: u64,
+
+    /// Base URL of the local OpenAI-compatible runtime (LiteLLM or vLLM),
+    /// e.g. "http://127.0.0.1:4000". Its `/v1/models` list is reported as the
+    /// node's model inventory in the heartbeat. Never sent to the backend.
+    /// When absent, the heartbeat carries no `models` field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub models_url: Option<String>,
+
+    /// Optional bearer key for the local runtime's `/v1/models` endpoint
+    /// (e.g. a LiteLLM key). Used only against `models_url`, never sent to
+    /// the backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub models_api_key: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -236,6 +257,9 @@ impl Default for AgentConfig {
         Self {
             push_sec: default_push_sec(),
             poll_sec: default_poll_sec(),
+            heartbeat_sec: default_heartbeat_sec(),
+            models_url: None,
+            models_api_key: None,
         }
     }
 }
@@ -446,6 +470,10 @@ fn default_push_sec() -> u64 {
 
 fn default_poll_sec() -> u64 {
     2
+}
+
+fn default_heartbeat_sec() -> u64 {
+    60
 }
 
 fn default_listen_addr() -> String {
