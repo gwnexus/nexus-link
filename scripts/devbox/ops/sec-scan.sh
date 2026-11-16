@@ -20,10 +20,27 @@ if dbx_has gitleaks; then
   fi
 elif dbx_has rg && dbx_has git; then
   echo "gitleaks not available; pattern scan of tracked files..."
-  hits=$(git -C "${DBX_REPO_ROOT}" ls-files -z \
-    | (cd "${DBX_REPO_ROOT}" && xargs -0 rg -il --no-messages \
+  listing="$(mktemp)"
+  trap 'rm -f "${listing}"' EXIT
+  if ! git -C "${DBX_REPO_ROOT}" ls-files -z > "${listing}"; then
+    dbx_fail "secrets scan" "git ls-files failed"
+    exit 1
+  fi
+  files=()
+  while IFS= read -r -d '' f; do files+=("${f}"); done < "${listing}"
+  hits=""
+  if (( ${#files[@]} > 0 )); then
+    # rg exit codes: 0 = matches, 1 = no matches, 2 = error (e.g. unreadable file)
+    rc=0
+    hits=$(cd "${DBX_REPO_ROOT}" && rg -il \
         -e '-----BEGIN [A-Z ]*PRIVATE KEY-----' \
-        -e '(password|secret|api_key)\s*=\s*["\x27][^"\x27]{8,}["\x27]' -- 2>/dev/null) || true)
+        -e '(password|secret|api_key)\s*=\s*["\x27][^"\x27]{8,}["\x27]' \
+        -- "${files[@]}") || rc=$?
+    if (( rc > 1 )); then
+      dbx_fail "secrets scan" "ripgrep failed (exit ${rc}), scan incomplete"
+      exit 1
+    fi
+  fi
   if [[ -n "${hits}" ]]; then
     dbx_fail "potential secrets" "in tracked files:"
     sed 's/^/    /' <<< "${hits}"

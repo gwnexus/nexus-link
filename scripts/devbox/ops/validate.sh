@@ -13,7 +13,7 @@ dbx_header "Repo Validation"
 fails=0
 
 # Required files
-for f in package.json devbox.json; do
+for f in devbox.json; do
   if [[ -f "${DBX_REPO_ROOT}/${f}" ]]; then
     dbx_ok "${f}" "found"
   else
@@ -26,11 +26,13 @@ if [[ -f "${DBX_REPO_ROOT}/tsconfig.json" ]]; then
 fi
 
 # JSON syntax (jq, else node)
-for f in package.json devbox.json; do
+for f in devbox.json; do
   path="${DBX_REPO_ROOT}/${f}"
   [[ -f "${path}" ]] || continue
   if dbx_has jq; then
-    valid_cmd=(jq empty "${path}")
+    # -s slurps all top-level values; exactly one must exist (rejects empty
+    # files and concatenated values like `{} {}`), malformed JSON exits non-zero.
+    valid_cmd=(jq -se 'length == 1' "${path}")
   elif dbx_has node; then
     valid_cmd=(node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "${path}")
   else

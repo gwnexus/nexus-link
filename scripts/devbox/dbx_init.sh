@@ -278,8 +278,14 @@ print_help() {
 # first init_hook entry loads it into the devbox environment.
 # -------------------------------------------------------------------
 check_plugin_env() {
-  if [[ -f "${DBX_REPO_ROOT}/.nexus/plugin.env" ]]; then
-    _record "plugin-env" ok "loaded from .nexus/plugin.env"
+  local penv="${DBX_REPO_ROOT}/.nexus/plugin.env"
+  if [[ -f "${penv}" ]]; then
+    # Same marker check as the devbox init hook, which skips unmarked files.
+    if grep -qF '# Sourced by the devbox init hook' "${penv}"; then
+      _record "plugin-env" ok "loaded from .nexus/plugin.env"
+    else
+      _record "plugin-env" warn "not loaded: written by an older nexus CLI; run nexus upgrade, then nexus pull"
+    fi
   else
     _record "plugin-env" info "none (no plugin vars, or run nexus pull)"
   fi

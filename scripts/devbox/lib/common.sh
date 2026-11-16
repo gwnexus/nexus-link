@@ -36,7 +36,7 @@ fi
 
 dbx_icon() {
   case "${DBX_ICON_SET}:${1}" in
-    ascii:ok)   printf "OK"  ;; ascii:fail) printf "ERR" ;; ascii:warn) printf "WRN" ;; ascii:info) printf "--"  ;;
+    ascii:ok)   printf "OK"  ;; ascii:fail) printf "ERR" ;; ascii:warn) printf "WRN" ;; ascii:info) printf "%s" "--" ;;
     ticks:ok)   printf "✓"   ;; ticks:fail) printf "✗"   ;; ticks:warn) printf "⚠"   ;; ticks:info) printf "·"   ;;
     blocks:ok)  printf "■"   ;; blocks:fail)printf "■"   ;; blocks:warn)printf "■"   ;; blocks:info)printf "□"   ;;
     *)          printf "%s" "$1" ;;
