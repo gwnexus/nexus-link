@@ -35,24 +35,51 @@ pub async fn collect_telemetry(config: &Config) -> anyhow::Result<TelemetryPaylo
 }
 
 fn collect_system_metrics() -> SystemMetrics {
-    let mut sys = System::new_all();
-    sys.refresh_all();
+    // sysinfo 0.40 returns errors instead of empty data; report zeros for
+    // what cannot be read (unsupported platform, missing /proc) and keep
+    // pushing the rest.
+    let (cpu_usage_percent, memory_total_bytes, memory_used_bytes) = match System::new_all() {
+        Ok(mut sys) => {
+            sys.refresh_all();
+            (
+                sys.global_cpu_usage() as f64,
+                sys.total_memory(),
+                sys.used_memory(),
+            )
+        }
+        Err(e) => {
+            debug!("System metrics unavailable: {}", e);
+            (0.0, 0, 0)
+        }
+    };
 
-    let disks = Disks::new_with_refreshed_list();
-    let disk_total: u64 = disks.iter().map(|d| d.total_space()).sum();
-    let disk_used: u64 = disks
-        .iter()
-        .map(|d| d.total_space() - d.available_space())
-        .sum();
+    let (disk_total_bytes, disk_used_bytes) = match Disks::new_with_refreshed_list() {
+        Ok(disks) => disk_totals(disks.iter().map(|d| (d.total_space(), d.available_space()))),
+        Err(e) => {
+            debug!("Disk metrics unavailable: {}", e);
+            (0, 0)
+        }
+    };
 
     SystemMetrics {
-        cpu_usage_percent: sys.global_cpu_usage() as f64,
-        memory_total_bytes: sys.total_memory(),
-        memory_used_bytes: sys.used_memory(),
-        disk_total_bytes: disk_total,
-        disk_used_bytes: disk_used,
-        uptime_secs: System::uptime(),
+        cpu_usage_percent,
+        memory_total_bytes,
+        memory_used_bytes,
+        disk_total_bytes,
+        disk_used_bytes,
+        uptime_secs: System::uptime().unwrap_or(0),
     }
+}
+
+/// Total and used bytes over `(total, available)` per disk. Saturating, as
+/// `available` can exceed `total` on some filesystems (e.g. overlays).
+fn disk_totals(disks: impl Iterator<Item = (u64, u64)>) -> (u64, u64) {
+    disks.fold((0u64, 0u64), |(total, used), (t, avail)| {
+        (
+            total.saturating_add(t),
+            used.saturating_add(t.saturating_sub(avail)),
+        )
+    })
 }
 
 async fn collect_container_metrics() -> anyhow::Result<Vec<ContainerMetrics>> {
@@ -439,5 +466,12 @@ mod tests {
         }));
         assert_eq!(network_totals(&stats), (15, 20));
         assert_eq!(network_totals(&stats_json(serde_json::json!({}))), (0, 0));
+    }
+
+    #[test]
+    fn disk_totals_sum_and_never_underflow() {
+        let disks = [(100, 40), (50, 60), (10, 10)];
+        assert_eq!(disk_totals(disks.into_iter()), (160, 60));
+        assert_eq!(disk_totals(std::iter::empty()), (0, 0));
     }
 }
