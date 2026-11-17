@@ -50,7 +50,7 @@ anyhow = "1"
 
 # Crypto (token hashing)
 sha2 = "0.10"
-base64 = "0.22"
+base64 = "0.23"
 rand = "0.9"
 
 # Crypto (Ed25519 signed commands — ADR-0051 v2)
