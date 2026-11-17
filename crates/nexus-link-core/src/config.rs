@@ -111,6 +111,151 @@ pub fn system_config_path() -> PathBuf {
     PathBuf::from(SYSTEM_CONFIG_DIR).join(config_filename_for_profile(&profile))
 }
 
+// ── File permissions (SEC-001) ───────────────────────────────────────────────
+
+/// Mode of the system config dir: root writes, the service group reads.
+pub const SYSTEM_CONFIG_DIR_MODE: u32 = 0o750;
+/// Mode of files in the system config dir (configs, signing key).
+pub const SYSTEM_CONFIG_FILE_MODE: u32 = 0o640;
+/// Mode of a user config dir (`~/.nexus-link`).
+pub const USER_CONFIG_DIR_MODE: u32 = 0o700;
+/// Mode of files in a user config dir.
+pub const USER_CONFIG_FILE_MODE: u32 = 0o600;
+
+/// Whether `dir` is the system config dir (`/etc/nexus-link`).
+pub fn is_system_config_dir(dir: &std::path::Path) -> bool {
+    dir == std::path::Path::new(SYSTEM_CONFIG_DIR)
+}
+
+/// Target modes for a file written into `dir`: `(dir_mode, file_mode)`.
+pub fn private_file_modes(dir: &std::path::Path) -> (u32, u32) {
+    if is_system_config_dir(dir) {
+        (SYSTEM_CONFIG_DIR_MODE, SYSTEM_CONFIG_FILE_MODE)
+    } else {
+        (USER_CONFIG_DIR_MODE, USER_CONFIG_FILE_MODE)
+    }
+}
+
+/// Write a file that may hold secrets (config, signing key) with the
+/// permissions of its directory (see [`private_file_modes`]).
+///
+/// The file is created `0600` before any content is written, so it is never
+/// readable by others in between. In the system config dir, file and dir
+/// are then handed to `root:nexus-link`; this needs root and fails with a
+/// clear error otherwise. If the `nexus-link` group does not exist yet
+/// (setup not run), the file stays `0600` root-only.
+pub fn write_private_file(path: &std::path::Path, content: &[u8]) -> anyhow::Result<()> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("{} has no parent directory", path.display()))?;
+    std::fs::create_dir_all(dir)?;
+
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(USER_CONFIG_FILE_MODE)
+            .open(path)
+            .map_err(|e| anyhow::anyhow!("Cannot write {}: {}", path.display(), e))?;
+        // An existing file keeps its mode on open; tighten before writing.
+        file.set_permissions(std::fs::Permissions::from_mode(USER_CONFIG_FILE_MODE))?;
+        file.write_all(content)?;
+        file.sync_all()?;
+        drop(file);
+
+        let (dir_mode, file_mode) = private_file_modes(dir);
+        if is_system_config_dir(dir) {
+            match service_group_gid() {
+                Some(gid) => {
+                    std::os::unix::fs::chown(path, Some(0), Some(gid)).map_err(|e| {
+                        anyhow::anyhow!(
+                            "Cannot set owner root:{} on {}: {} (run with sudo)",
+                            SERVICE_GROUP,
+                            path.display(),
+                            e
+                        )
+                    })?;
+                    std::fs::set_permissions(path, std::fs::Permissions::from_mode(file_mode))?;
+                    std::os::unix::fs::chown(dir, Some(0), Some(gid)).map_err(|e| {
+                        anyhow::anyhow!(
+                            "Cannot set owner root:{} on {}: {} (run with sudo)",
+                            SERVICE_GROUP,
+                            dir.display(),
+                            e
+                        )
+                    })?;
+                    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(dir_mode))?;
+                }
+                None => tracing::warn!(
+                    path = %path.display(),
+                    "group '{}' not found; file stays root-only (run `nexus-link setup`)",
+                    SERVICE_GROUP
+                ),
+            }
+        } else {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(file_mode))?;
+            // Best effort: the user dir may be shared with other tools.
+            let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(dir_mode));
+        }
+    }
+
+    #[cfg(not(unix))]
+    std::fs::write(path, content)?;
+
+    Ok(())
+}
+
+/// Numeric gid of the service group, if it exists (`getent group`, which
+/// also covers NSS sources; falls back to `/etc/group`).
+#[cfg(unix)]
+pub fn service_group_gid() -> Option<u32> {
+    let from_getent = std::process::Command::new("getent")
+        .args(["group", SERVICE_GROUP])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+    let text = from_getent.or_else(|| std::fs::read_to_string("/etc/group").ok())?;
+    parse_group_gid(&text, SERVICE_GROUP)
+}
+
+/// Find the gid of `group` in `/etc/group` formatted text.
+pub fn parse_group_gid(text: &str, group: &str) -> Option<u32> {
+    text.lines().find_map(|line| {
+        let mut fields = line.split(':');
+        if fields.next()? != group {
+            return None;
+        }
+        fields.nth(1)?.trim().parse().ok()
+    })
+}
+
+/// Directories searched for `signing_key.pub`, most specific first: the dir
+/// of the effective config (`/etc/nexus-link` for system installs), the
+/// profile's state dir, the system state dir (legacy `setup` location) and
+/// `~/.nexus-link`. Duplicates are removed.
+pub fn signing_key_dirs() -> Vec<PathBuf> {
+    let profile = active_profile();
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let candidates = [
+        effective_config_path().parent().map(PathBuf::from),
+        Some(state_dir_for_profile(&profile)),
+        Some(PathBuf::from(SYSTEM_STATE_DIR)),
+        Some(dirs_home()),
+    ];
+    for dir in candidates.into_iter().flatten() {
+        if !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+    dirs
+}
+
 /// Default config path: ~/.nexus-link/config.toml
 pub fn default_config_path() -> PathBuf {
     dirs_home().join("config.toml")
@@ -379,26 +524,15 @@ impl Config {
         self.save_to(effective_config_path())
     }
 
-    /// Save config to a specific path
+    /// Save config to a specific path.
+    ///
+    /// Permissions (SEC-001, see [`write_private_file`]): in the system
+    /// config dir the file becomes `0640 root:nexus-link` and the dir `0750
+    /// root:nexus-link`, so the services can read but not modify it; anywhere
+    /// else (`~/.nexus-link`) the file is `0600` and the dir `0700`.
     pub fn save_to(&self, path: PathBuf) -> anyhow::Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-            // Restrict directory permissions to owner-only (SEC-001)
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
-            }
-        }
         let content = toml::to_string_pretty(self)?;
-        std::fs::write(&path, content)?;
-        // Restrict config file permissions to owner-only (SEC-001)
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-        }
-        Ok(())
+        write_private_file(&path, content.as_bytes())
     }
 
     /// Migrate fields from old config layout to new layout.

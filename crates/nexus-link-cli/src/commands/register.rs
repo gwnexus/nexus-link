@@ -1,6 +1,6 @@
 use nexus_link_core::config::{
-    AgentConfig, ApiConfig, ApiTokens, ComposeConfig, Config, NodeConfig, SERVICE_GROUP,
-    SERVICE_USER, SYSTEM_CONFIG_DIR, ServiceConfig, TokenEntry, system_config_path,
+    AgentConfig, ApiConfig, ApiTokens, ComposeConfig, Config, NodeConfig, SYSTEM_CONFIG_DIR,
+    ServiceConfig, TokenEntry, system_config_path,
 };
 use nexus_link_core::preflight::{self, PreflightVerdict};
 use nexus_link_core::types::RegisterRequest;
@@ -149,53 +149,26 @@ pub async fn execute(
         },
     };
 
-    // Save config to system path (preferred) or fallback to user path
+    // Save config to system path (preferred) or fallback to user path.
+    // Permissions come from save_to: 0640 root:nexus-link in /etc/nexus-link
+    // (service reads, cannot modify), 0600 in ~/.nexus-link.
     let save_path = if std::path::Path::new(SYSTEM_CONFIG_DIR).exists() {
         let sys_path = system_config_path();
         config.save_to(sys_path.clone())?;
-        // Set ownership to nexus-link service user
-        let _ = std::process::Command::new("sudo")
-            .args([
-                "chown",
-                &format!("{}:{}", SERVICE_USER, SERVICE_GROUP),
-                &sys_path.to_string_lossy(),
-            ])
-            .output();
-        let _ = std::process::Command::new("sudo")
-            .args(["chmod", "600", &sys_path.to_string_lossy()])
-            .output();
         sys_path
     } else {
         config.save()?;
         nexus_link_core::config::effective_config_path()
     };
 
-    // Write signing_key.pub if the backend provided one
+    // Write signing_key.pub next to the config (first place the service and
+    // agent look, see config::signing_key_dirs)
     if let Some(ref pubkey_b64) = signing_public_key {
         let key_dir = save_path
             .parent()
             .unwrap_or(std::path::Path::new(SYSTEM_CONFIG_DIR));
-        let key_path = key_dir.join("signing_key.pub");
-        // Try direct write first, sudo fallback for /var/lib/nexus-link/
-        if std::fs::write(&key_path, pubkey_b64).is_err() {
-            let mut child = std::process::Command::new("sudo")
-                .args(["tee", &key_path.to_string_lossy()])
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::null())
-                .spawn()?;
-            if let Some(stdin) = child.stdin.as_mut() {
-                use std::io::Write;
-                stdin.write_all(pubkey_b64.as_bytes())?;
-            }
-            child.wait()?;
-            let _ = std::process::Command::new("sudo")
-                .args([
-                    "chown",
-                    &format!("{}:{}", SERVICE_USER, SERVICE_GROUP),
-                    &key_path.to_string_lossy(),
-                ])
-                .output();
-        }
+        let key_path = key_dir.join(nexus_link_core::signing::SIGNING_KEY_FILE);
+        nexus_link_core::config::write_private_file(&key_path, pubkey_b64.as_bytes())?;
         println!("  Signing key: {}", key_path.display());
     }
 

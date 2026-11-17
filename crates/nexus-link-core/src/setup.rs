@@ -162,27 +162,47 @@ fn add_docker_group() -> SetupStep {
 fn create_config_dir() -> SetupStep {
     let config_dir = Path::new(SYSTEM_CONFIG_DIR);
     let state_dir = Path::new(config::SYSTEM_STATE_DIR);
+    let group_owner = format!("root:{}", SERVICE_GROUP);
+    let dir_mode = format!("{:o}", config::SYSTEM_CONFIG_DIR_MODE);
+    let file_mode = format!("{:o}", config::SYSTEM_CONFIG_FILE_MODE);
 
-    let mut created = Vec::new();
+    let mut done = Vec::new();
 
-    // Create /etc/nexus-link/ (root-owned, readable by service)
-    if !config_dir.exists() {
-        let result = sudo(&["mkdir", "-p", SYSTEM_CONFIG_DIR])
-            .and_then(|()| sudo(&["chown", "root:root", SYSTEM_CONFIG_DIR]))
-            .and_then(|()| sudo(&["chmod", "755", SYSTEM_CONFIG_DIR]));
-        match result {
-            Ok(()) => created.push(SYSTEM_CONFIG_DIR),
-            Err(e) => {
-                return SetupStep {
-                    name: "Config directory",
-                    status: StepStatus::Failed,
-                    message: format!("Failed to create {}: {}", SYSTEM_CONFIG_DIR, e),
-                };
+    // /etc/nexus-link: root writes, the service group reads (SEC-001).
+    // Also converges existing installs, whose dir was 0755 or 0700 root:root
+    // and whose files the service user could not read.
+    let existed = config_dir.exists();
+    let result = sudo(&["mkdir", "-p", SYSTEM_CONFIG_DIR])
+        .and_then(|()| sudo(&["chown", &group_owner, SYSTEM_CONFIG_DIR]))
+        .and_then(|()| sudo(&["chmod", &dir_mode, SYSTEM_CONFIG_DIR]))
+        .and_then(|()| {
+            // Configs and signing key: 0640 root:nexus-link
+            for file in system_config_files() {
+                let f = file.to_string_lossy();
+                sudo(&["chown", &group_owner, &f])?;
+                sudo(&["chmod", &file_mode, &f])?;
             }
+            Ok(())
+        });
+    match result {
+        Ok(()) => done.push(format!(
+            "{} {} ({} {})",
+            if existed { "secured" } else { "created" },
+            SYSTEM_CONFIG_DIR,
+            dir_mode,
+            group_owner
+        )),
+        Err(e) => {
+            return SetupStep {
+                name: "Directories",
+                status: StepStatus::Failed,
+                message: format!("Failed to prepare {}: {}", SYSTEM_CONFIG_DIR, e),
+            };
         }
     }
 
-    // Create /var/lib/nexus-link/ (service-owned, for runtime state/keys)
+    // /var/lib/nexus-link: service-owned runtime state (systemd's
+    // StateDirectory= also creates and owns it; this covers manual starts).
     if !state_dir.exists() {
         let result = sudo(&["mkdir", "-p", config::SYSTEM_STATE_DIR])
             .and_then(|()| {
@@ -194,10 +214,10 @@ fn create_config_dir() -> SetupStep {
             })
             .and_then(|()| sudo(&["chmod", "700", config::SYSTEM_STATE_DIR]));
         match result {
-            Ok(()) => created.push(config::SYSTEM_STATE_DIR),
+            Ok(()) => done.push(format!("created {}", config::SYSTEM_STATE_DIR)),
             Err(e) => {
                 return SetupStep {
-                    name: "Config directory",
+                    name: "Directories",
                     status: StepStatus::Failed,
                     message: format!("Failed to create {}: {}", config::SYSTEM_STATE_DIR, e),
                 };
@@ -205,23 +225,33 @@ fn create_config_dir() -> SetupStep {
         }
     }
 
-    if created.is_empty() {
-        SetupStep {
-            name: "Directories",
-            status: StepStatus::Skipped,
-            message: format!(
-                "{} and {} already exist",
-                SYSTEM_CONFIG_DIR,
-                config::SYSTEM_STATE_DIR
-            ),
-        }
-    } else {
-        SetupStep {
-            name: "Directories",
-            status: StepStatus::Created,
-            message: format!("Created: {}", created.join(", ")),
-        }
+    SetupStep {
+        name: "Directories",
+        status: StepStatus::Created,
+        message: done.join(", "),
     }
+}
+
+/// Config files and signing key in the system config dir.
+fn system_config_files() -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(SYSTEM_CONFIG_DIR) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(is_system_config_file_name)
+        })
+        .collect()
+}
+
+/// `config.toml`, `config.<profile>.toml` or `signing_key.pub`.
+pub fn is_system_config_file_name(name: &str) -> bool {
+    name == crate::signing::SIGNING_KEY_FILE
+        || (name.starts_with("config") && name.ends_with(".toml") && !name.contains('/'))
 }
 
 fn migrate_legacy_config() -> SetupStep {
@@ -257,8 +287,14 @@ fn migrate_legacy_config() -> SetupStep {
     let system_str = system_path.to_string_lossy().to_string();
 
     let result = sudo(&["cp", "-p", &source_str, &system_str])
-        .and_then(|()| sudo(&["chown", "root:root", &system_str]))
-        .and_then(|()| sudo(&["chmod", "600", &system_str]));
+        .and_then(|()| sudo(&["chown", &format!("root:{}", SERVICE_GROUP), &system_str]))
+        .and_then(|()| {
+            sudo(&[
+                "chmod",
+                &format!("{:o}", config::SYSTEM_CONFIG_FILE_MODE),
+                &system_str,
+            ])
+        });
 
     // Migrate signing_key.pub to state directory
     let legacy_key_locations = [
@@ -468,73 +504,32 @@ fn find_user_binary_dir() -> Option<PathBuf> {
 
 const SYSTEMD_DIR: &str = "/etc/systemd/system";
 
-const AGENT_UNIT: &str = r#"[Unit]
-Description=Nexus Link Agent — telemetry push daemon
-After=network-online.target docker.service
-Wants=network-online.target
-Requires=docker.service
-
-[Service]
-Type=simple
-User=nexus-link
-Group=nexus-link
-SupplementaryGroups=docker
-ExecStart=/usr/local/bin/nexus-link-agent
-Restart=on-failure
-RestartSec=5
-Environment=NEXUS_LINK_CONFIG=/etc/nexus-link/config.toml
-
-# Hardening
-ProtectHome=true
-ProtectSystem=strict
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-RestrictSUIDSGID=true
-NoNewPrivileges=true
-ReadWritePaths=/var/lib/nexus-link
-
-[Install]
-WantedBy=multi-user.target
-"#;
-
-const SERVICE_UNIT: &str = r#"[Unit]
-Description=Nexus Link Service — command receiver (HTTPS :8443)
-After=network-online.target docker.service
-Wants=network-online.target
-Requires=docker.service
-
-[Service]
-Type=simple
-User=nexus-link
-Group=nexus-link
-SupplementaryGroups=docker
-ExecStart=/usr/local/bin/nexus-link-service
-Restart=on-failure
-RestartSec=5
-Environment=NEXUS_LINK_CONFIG=/etc/nexus-link/config.toml
-
-# Hardening
-ProtectHome=true
-ProtectSystem=strict
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-RestrictSUIDSGID=true
-NoNewPrivileges=true
-ReadWritePaths=/var/lib/nexus-link
-
-[Install]
-WantedBy=multi-user.target
-"#;
-
 fn install_systemd_units() -> SetupStep {
     let agent_path = format!("{}/nexus-link-agent.service", SYSTEMD_DIR);
     let service_path = format!("{}/nexus-link-service.service", SYSTEMD_DIR);
 
+    // Same template as `nexus-link agent start` (crate::systemd)
+    let compose_dir = config::Config::load()
+        .map(|c| c.compose.dir)
+        .unwrap_or_else(|_| PathBuf::from("/opt/dgx-llm"));
+    let agent_bin = Path::new(INSTALL_DIR).join("nexus-link-agent");
+    let service_bin = Path::new(INSTALL_DIR).join("nexus-link-service");
+    let config_path = Path::new(SYSTEM_CONFIG_DIR).join("config.toml");
+    let params = crate::systemd::UnitParams {
+        profile: config::DEFAULT_PROFILE,
+        agent_bin: &agent_bin,
+        service_bin: &service_bin,
+        config_path: &config_path,
+        compose_dir: &compose_dir,
+        user: crate::systemd::UnitUser::Dedicated,
+        scope: crate::systemd::UnitScope::System,
+    };
+
     // Write unit files via tee (sudo)
-    let result = write_file_sudo(&agent_path, AGENT_UNIT)
-        .and_then(|()| write_file_sudo(&service_path, SERVICE_UNIT))
+    let result = write_file_sudo(&agent_path, &crate::systemd::render_agent_unit(&params))
+        .and_then(|()| {
+            write_file_sudo(&service_path, &crate::systemd::render_service_unit(&params))
+        })
         .and_then(|()| sudo(&["systemctl", "daemon-reload"]));
 
     match result {

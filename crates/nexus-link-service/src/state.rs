@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bollard::Docker;
 use ed25519_dalek::VerifyingKey;
-use nexus_link_core::config::{Config, dirs_home};
+use nexus_link_core::config::{Config, signing_key_dirs};
 use nexus_link_core::signing::{KeyLoad, NonceCache, load_verifying_key};
 use nexus_link_core::token::hash_token;
 use tracing::warn;
@@ -49,7 +49,7 @@ pub type SharedState = Arc<AppState>;
 /// Load the Ed25519 verifying key (see `nexus_link_core::signing`):
 /// `~/.nexus-link/signing_key.pub` first, then `compose.signing_public_key`.
 fn load_signing_pubkey(config: &Config) -> Option<VerifyingKey> {
-    let load = load_verifying_key(&config.compose, &dirs_home());
+    let load = load_verifying_key(&config.compose, &signing_key_dirs());
     match &load {
         KeyLoad::Loaded(_) => {}
         KeyLoad::Invalid(source) => warn!(

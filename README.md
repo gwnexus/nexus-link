@@ -271,13 +271,24 @@ nexus-link agent start
 ### Profile file layout
 
 ```
-/etc/nexus-link/
-  config.toml              # default profile (production)
-  config.staging.toml      # staging profile
+/etc/nexus-link/              0750 root:nexus-link
+  config.toml                 0640 root:nexus-link  default profile (production)
+  config.staging.toml         0640 root:nexus-link  staging profile
+  signing_key.pub             0640 root:nexus-link  Ed25519 verifying key
 
-/var/lib/nexus-link/       # default profile state
-/var/lib/nexus-link/staging/  # staging profile state
+/var/lib/nexus-link/          0700 nexus-link       default profile state
+/var/lib/nexus-link/staging/  0700 nexus-link       staging profile state
 ```
+
+The services run as `nexus-link` and can read their config but not change
+it; only root (`sudo nexus-link config set ...`, `register`, `setup`) writes
+`/etc/nexus-link`. Every write applies these modes, and `nexus-link setup`
+converges an existing install to them. A user-mode config in
+`~/.nexus-link/` is `0600` in a `0700` dir.
+
+The verifying key is looked up as `signing_key.pub` next to the config, then
+in the profile's state dir, `/var/lib/nexus-link/` and `~/.nexus-link/`;
+`compose.signing_public_key` in the config is the fallback.
 
 ### Systemd services
 
@@ -285,6 +296,13 @@ nexus-link agent start
 |-----------|--------------------------------------|----------------------------------------|
 | default   | `nexus-link-agent.service`           | `nexus-link-service.service`           |
 | staging   | `nexus-link-agent@staging.service`   | `nexus-link-service@staging.service`   |
+
+`nexus-link setup` (default profile) and `nexus-link [--profile P] agent
+start` generate the units from one template: `User=nexus-link`,
+`StateDirectory=nexus-link[/<profile>]` as working directory,
+`ProtectSystem=strict` with `/etc/nexus-link` read-only, and write access to
+`compose.dir` for the command service only. Existing unit files are not
+overwritten; delete them before `agent start` to regenerate.
 
 **Important:** Each profile MUST use a distinct `compose.dir` and `service.port`
 to prevent command conflicts and port collisions between profiles.

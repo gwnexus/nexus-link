@@ -15,8 +15,31 @@ this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
 
 ## [Unreleased]
 
+### Security
+
+- **Consistent permissions on `/etc/nexus-link`** (from the v0.11.0 Spark
+  rollout). Configs and the signing key are `0640 root:nexus-link` in a
+  `0750 root:nexus-link` dir: the services read them but cannot modify their
+  own config. Before, `setup` created `0600 root:root` files (unreadable for
+  the service), `register` handed the config to the service user, and every
+  save reset the dir to `0700`, locking the service out. `nexus-link setup`
+  now also converges existing installs. Files are created `0600` before any
+  content is written (`config::write_private_file`).
+
 ### Fixed
 
+- **systemd units for profiles** failed under `ProtectSystem=strict` with
+  `WorkingDirectory=/etc/nexus-link`. Units now come from one template
+  (`nexus_link_core::systemd`) for `setup` and `agent start`:
+  `StateDirectory=nexus-link[/<profile>]` as working dir, config dir
+  read-only, compose dir writable for the command service only. The `setup`
+  units could not write the compose dir before.
+- **`signing_key.pub` was never found** where `register` and `setup` put it
+  (`/etc/nexus-link`, `/var/lib/nexus-link`); only `~/.nexus-link` was
+  searched. Nodes worked only through `compose.signing_public_key`. The key
+  is now searched next to the config, in the state dirs and in
+  `~/.nexus-link`; `config set compose.signing_public_key` writes it next to
+  the config.
 - Agent container stats could panic on a container without an id
   (`&id[..12]` slice in the stats error path).
 

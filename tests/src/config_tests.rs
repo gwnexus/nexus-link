@@ -327,3 +327,46 @@ fn test_config_load_uses_effective_path() {
     assert_eq!(loaded.node.node_id, "env-test-node");
     assert_eq!(loaded.api.base_url, "https://env.example.com");
 }
+
+#[test]
+fn test_private_file_modes_by_directory() {
+    use nexus_link_core::config::private_file_modes;
+    assert_eq!(
+        private_file_modes(std::path::Path::new("/etc/nexus-link")),
+        (0o750, 0o640)
+    );
+    assert_eq!(
+        private_file_modes(std::path::Path::new("/home/op/.nexus-link")),
+        (0o700, 0o600)
+    );
+}
+
+#[test]
+fn test_parse_group_gid() {
+    use nexus_link_core::config::parse_group_gid;
+    let group = "root:x:0:\ndocker:x:988:nexus-link\nnexus-link:x:983:\n";
+    assert_eq!(parse_group_gid(group, "nexus-link"), Some(983));
+    assert_eq!(parse_group_gid(group, "docker"), Some(988));
+    assert_eq!(parse_group_gid(group, "nexus"), None);
+    assert_eq!(parse_group_gid("broken", "broken"), None);
+}
+
+#[cfg(unix)]
+#[test]
+fn test_user_config_written_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join(".nexus-link");
+    let path = dir.join("config.toml");
+    // A pre-existing world-readable file is tightened, not kept
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(&path, "old").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    nexus_link_core::config::write_private_file(&path, b"secret = 1\n").unwrap();
+
+    let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&path), 0o600);
+    assert_eq!(mode(&dir), 0o700);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "secret = 1\n");
+}

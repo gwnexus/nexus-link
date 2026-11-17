@@ -1,4 +1,4 @@
-use nexus_link_core::config::{self, Config, SERVICE_GROUP, SERVICE_USER, SYSTEM_CONFIG_DIR};
+use nexus_link_core::config::{self, Config, SYSTEM_CONFIG_DIR};
 use std::path::PathBuf;
 use tracing::info;
 
@@ -244,137 +244,53 @@ fn systemd_unit_path(service_name: &str, mode: SystemdMode) -> PathBuf {
     }
 }
 
-/// Generate systemd unit files for agent and service
+/// Generate systemd unit files for agent and service (shared template in
+/// `nexus_link_core::systemd`, also used by `nexus-link setup`).
 fn generate_systemd_units(mode: SystemdMode) -> anyhow::Result<()> {
-    let nexus_link_bin = which_binary("nexus-link-agent")?;
-    let nexus_link_service_bin = which_binary("nexus-link-service")?;
+    use nexus_link_core::systemd::{
+        UnitParams, UnitScope, UnitUser, render_agent_unit, render_service_unit,
+    };
+
+    let agent_bin = which_binary("nexus-link-agent")?;
+    let service_bin = which_binary("nexus-link-service")?;
     let config_path = config::effective_config_path();
-    let working_dir = config_path
-        .parent()
-        .unwrap_or(&PathBuf::from(SYSTEM_CONFIG_DIR))
-        .display()
-        .to_string();
     let agent_svc = agent_service_name();
     let service_svc = service_service_name();
     let profile = nexus_link_core::config::active_profile();
-    let profile_suffix = if profile == nexus_link_core::config::DEFAULT_PROFILE {
-        String::new()
+    let compose_dir = Config::load()
+        .map(|c| c.compose.dir)
+        .unwrap_or_else(|_| PathBuf::from("/opt/dgx-llm"));
+
+    // The dedicated system user exists once `nexus-link setup` has created
+    // the system config dir.
+    let user = if std::path::Path::new(SYSTEM_CONFIG_DIR).exists() {
+        UnitUser::Dedicated
     } else {
-        format!(" ({})", profile)
-    };
-
-    // Determine whether we use the dedicated system user or the current user
-    let use_dedicated_user = std::path::Path::new(SYSTEM_CONFIG_DIR).exists();
-
-    let (user_directive, install_target, extra_hardening) = match mode {
-        SystemdMode::System => {
-            let user_line = if use_dedicated_user {
-                format!(
-                    "User={}\nGroup={}\nSupplementaryGroups=docker\nEnvironment=NEXUS_LINK_CONFIG={}",
-                    SERVICE_USER,
-                    SERVICE_GROUP,
-                    config_path.display()
-                )
-            } else {
-                let current_user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
-                let current_home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-                if current_user != "root" {
-                    format!(
-                        "User={}\nGroup={}\nEnvironment=HOME={}",
-                        current_user, current_user, current_home
-                    )
-                } else {
-                    String::new()
-                }
-            };
-
-            let compose_dir = Config::load()
-                .map(|c| c.compose.dir.display().to_string())
-                .unwrap_or_else(|_| "/opt/dgx-llm".to_string());
-
-            (
-                user_line,
-                "WantedBy=multi-user.target".to_string(),
-                format!(
-                    "\
-# Security hardening
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=yes
-ReadWritePaths={working_dir} {compose_dir}
-PrivateTmp=true
-ProtectKernelTunables=yes
-ProtectControlGroups=yes
-RestrictSUIDSGID=yes",
-                    working_dir = working_dir,
-                    compose_dir = compose_dir,
-                ),
-            )
+        let current_user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
+        if current_user == "root" {
+            UnitUser::Root
+        } else {
+            UnitUser::Login {
+                user: current_user,
+                home: std::env::var("HOME").unwrap_or_else(|_| "/root".to_string()),
+            }
         }
-        SystemdMode::User => (
-            String::new(),
-            "WantedBy=default.target".to_string(),
-            String::new(),
-        ),
     };
 
-    // Agent unit
-    let agent_unit = format!(
-        r#"[Unit]
-Description=Nexus Link Telemetry Agent{profile_suffix}
-Documentation=https://github.com/gwnexus/nexus-link
-After=network-online.target docker.service
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart={bin}
-Restart=always
-RestartSec=10
-Environment=RUST_LOG=nexus_link_agent=info
-WorkingDirectory={home}
-{user}
-{extra}
-
-[Install]
-{install}
-"#,
-        profile_suffix = profile_suffix,
-        bin = nexus_link_bin.display(),
-        home = working_dir,
-        user = user_directive,
-        extra = extra_hardening,
-        install = install_target,
-    );
-
-    // Service unit
-    let service_unit = format!(
-        r#"[Unit]
-Description=Nexus Link Command Service{profile_suffix}
-Documentation=https://github.com/gwnexus/nexus-link
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart={bin}
-Restart=always
-RestartSec=10
-Environment=RUST_LOG=nexus_link_service=info
-WorkingDirectory={home}
-{user}
-{extra}
-
-[Install]
-{install}
-"#,
-        profile_suffix = profile_suffix,
-        bin = nexus_link_service_bin.display(),
-        home = working_dir,
-        user = user_directive,
-        extra = extra_hardening,
-        install = install_target,
-    );
+    let params = UnitParams {
+        profile: &profile,
+        agent_bin: &agent_bin,
+        service_bin: &service_bin,
+        config_path: &config_path,
+        compose_dir: &compose_dir,
+        user,
+        scope: match mode {
+            SystemdMode::System => UnitScope::System,
+            SystemdMode::User => UnitScope::User,
+        },
+    };
+    let agent_unit = render_agent_unit(&params);
+    let service_unit = render_service_unit(&params);
 
     let agent_path = systemd_unit_path(&agent_svc, mode);
     let service_path = systemd_unit_path(&service_svc, mode);

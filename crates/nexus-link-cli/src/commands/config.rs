@@ -215,17 +215,20 @@ pub async fn set(key: String, value: String) -> anyhow::Result<()> {
             println!("  compose.require_signatures = {}", v);
         }
         "compose.signing_public_key" | "signing_public_key" => {
-            let key_path = dirs_home().join("signing_key.pub");
+            // Next to the effective config: the first place the service and
+            // agent look (config::signing_key_dirs)
+            let key_path = config::effective_config_path()
+                .parent()
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or_else(dirs_home)
+                .join(nexus_link_core::signing::SIGNING_KEY_FILE);
             if value.is_empty() {
                 config.compose.signing_public_key = None;
                 let _ = std::fs::remove_file(&key_path);
                 println!("  compose.signing_public_key cleared");
             } else {
                 // Write to signing_key.pub so the service picks it up at next start
-                if let Some(parent) = key_path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                std::fs::write(&key_path, &value)?;
+                config::write_private_file(&key_path, value.as_bytes())?;
                 config.compose.signing_public_key = Some(value.clone());
                 println!(
                     "  compose.signing_public_key = {}...",

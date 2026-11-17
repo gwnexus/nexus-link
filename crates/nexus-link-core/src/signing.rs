@@ -23,7 +23,7 @@
 //! the same node.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -77,13 +77,18 @@ impl KeyLoad {
     }
 }
 
-/// Load the verifying key: `<home>/signing_key.pub` first, then
+/// Load the verifying key: the first `signing_key.pub` found in `key_dirs`
+/// (in order, see `config::signing_key_dirs`), then
 /// `compose.signing_public_key` from the config. An invalid key file does
-/// not fall through to the config value silently; the caller logs it.
-pub fn load_verifying_key(compose: &ComposeConfig, home: &Path) -> KeyLoad {
+/// not fall through to another file or to the config value silently; the
+/// caller logs it.
+pub fn load_verifying_key(compose: &ComposeConfig, key_dirs: &[PathBuf]) -> KeyLoad {
     let mut invalid = None;
 
-    if let Ok(content) = std::fs::read_to_string(home.join(SIGNING_KEY_FILE)) {
+    if let Some(content) = key_dirs
+        .iter()
+        .find_map(|dir| std::fs::read_to_string(dir.join(SIGNING_KEY_FILE)).ok())
+    {
         match decode_verifying_key(&content) {
             Some(key) => return KeyLoad::Loaded(key),
             None => invalid = Some(SIGNING_KEY_FILE),

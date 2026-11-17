@@ -405,26 +405,26 @@ fn test_load_verifying_key_sources() {
     let mut config = ComposeConfig::default();
 
     assert!(matches!(
-        load_verifying_key(&config, home.path()),
+        load_verifying_key(&config, &[home.path().to_path_buf()]),
         KeyLoad::Missing
     ));
 
     config.signing_public_key = Some(b64.clone());
     assert!(matches!(
-        load_verifying_key(&config, home.path()),
+        load_verifying_key(&config, &[home.path().to_path_buf()]),
         KeyLoad::Loaded(_)
     ));
 
     config.signing_public_key = Some("not-a-key".into());
     assert!(matches!(
-        load_verifying_key(&config, home.path()),
+        load_verifying_key(&config, &[home.path().to_path_buf()]),
         KeyLoad::Invalid("compose.signing_public_key")
     ));
 
     // The key file wins over the config value
     std::fs::write(home.path().join("signing_key.pub"), format!("{b64}\n")).unwrap();
     assert!(matches!(
-        load_verifying_key(&config, home.path()),
+        load_verifying_key(&config, &[home.path().to_path_buf()]),
         KeyLoad::Loaded(_)
     ));
 }
@@ -444,4 +444,30 @@ fn test_heartbeat_reports_command_signatures() {
     )
     .unwrap();
     assert_eq!(body["command_signatures"], "enforced");
+}
+
+#[test]
+fn test_load_verifying_key_search_order() {
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(signing_key().verifying_key().to_bytes());
+    let etc = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let dirs = [etc.path().to_path_buf(), state.path().to_path_buf()];
+    let config = ComposeConfig::default();
+
+    // Key only in a later dir (e.g. /var/lib/nexus-link from `setup`)
+    std::fs::write(state.path().join("signing_key.pub"), &b64).unwrap();
+    assert!(matches!(
+        load_verifying_key(&config, &dirs),
+        KeyLoad::Loaded(_)
+    ));
+
+    // The first dir holding a key file decides; an invalid one is reported,
+    // not silently skipped in favor of the next file
+    std::fs::write(etc.path().join("signing_key.pub"), "garbage").unwrap();
+    assert!(matches!(
+        load_verifying_key(&config, &dirs),
+        KeyLoad::Invalid("signing_key.pub")
+    ));
 }

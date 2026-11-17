@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use nexus_link_core::config::{Config, dirs_home};
+use nexus_link_core::config::{Config, signing_key_dirs};
 use nexus_link_core::heartbeat::{
     HeartbeatPayload, HeartbeatResponse, ModelEntry, apply_backing_models, model_info_endpoint,
     models_endpoint, parse_model_info, parse_model_list,
@@ -115,7 +115,7 @@ async fn fetch_model_info(
 /// Command signature enforcement as the service applies it: same config
 /// flag and same key sources (`signing_key.pub`, then config).
 pub fn command_signature_state(config: &Config) -> SignatureState {
-    let key = load_verifying_key(&config.compose, &dirs_home());
+    let key = load_verifying_key(&config.compose, &signing_key_dirs());
     signature_state(config.compose.require_signatures, &key)
 }
 

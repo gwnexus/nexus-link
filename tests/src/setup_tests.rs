@@ -237,3 +237,19 @@ fn test_nexus_link_config_env_overrides_profile() {
     unsafe { std::env::remove_var("NEXUS_LINK_CONFIG") };
     unsafe { std::env::remove_var("NEXUS_LINK_PROFILE") };
 }
+
+#[test]
+fn test_setup_secures_config_and_key_files_only() {
+    use nexus_link_core::setup::is_system_config_file_name;
+    for name in ["config.toml", "config.staging.toml", "signing_key.pub"] {
+        assert!(is_system_config_file_name(name), "{name}");
+    }
+    for name in [
+        "config.toml.bak",
+        "README",
+        "tls.pem",
+        "signing_key.pub.old",
+    ] {
+        assert!(!is_system_config_file_name(name), "{name}");
+    }
+}
