@@ -18,7 +18,9 @@ const HUB_COMMIT: &str = "d5228b4bfeca26c975662b78a68b72c064cb2a6c";
 const VECTORS: &str = include_str!("../fixtures/hub/nexus-cmd-v1.vectors.json");
 
 /// Types in the pinned vectors the node does not execute (reported to the
-/// hub in Dispatch c2696a25). Their message and signature are still checked.
+/// hub in Dispatch c2696a25). They parse as `ComposeCommandType::Unknown`
+/// and still pass the full signature check; the poller then reports them as
+/// unsupported instead of executing them.
 const NOT_NODE_TYPES: &[&str] = &["compose_ps", "read_file"];
 
 struct Vector {
@@ -97,19 +99,29 @@ fn signature(v: &Vector) -> Signature {
     Signature::from_bytes(&bytes)
 }
 
-/// The node's queue item for a vector, if the node knows the command type.
-fn queue_item(v: &Vector) -> Option<ComposeCommandItem> {
-    let command_type: ComposeCommandType =
-        serde_json::from_value(Value::String(v.command_type.clone())).ok()?;
-    Some(ComposeCommandItem {
-        id: v.command_id.clone(),
-        command_type,
-        payload: Some(v.payload.clone()),
-        signature: Some(v.signature.clone()),
-        timestamp: Some(v.timestamp.clone()),
-        nonce: Some(v.nonce.clone()),
-        ..Default::default()
-    })
+/// The node's queue item for a vector, deserialized from the wire JSON the
+/// hub hands out, so the type goes through the node's real serde mapping.
+fn queue_item(v: &Vector) -> ComposeCommandItem {
+    let wire = serde_json::json!({
+        "id": v.command_id,
+        "type": v.command_type,
+        "payload": v.payload,
+        "signature": v.signature,
+        "timestamp": v.timestamp,
+        "nonce": v.nonce,
+    });
+    let item: ComposeCommandItem = serde_json::from_value(wire)
+        .unwrap_or_else(|e| panic!("vector `{}` does not deserialize: {e}", v.name));
+    let unknown = matches!(item.command_type, ComposeCommandType::Unknown(_));
+    assert_eq!(
+        unknown,
+        NOT_NODE_TYPES.contains(&v.command_type.as_str()),
+        "vector `{}`: unexpected mapping of type `{}`",
+        v.name,
+        v.command_type
+    );
+    assert_eq!(item.command_type.as_str(), v.command_type);
+    item
 }
 
 fn ctx<'a>(
@@ -161,17 +173,8 @@ fn test_hub_vectors_signatures_verify_with_test_key() {
 #[test]
 fn test_hub_vectors_pass_the_queue_verification_path() {
     let (key, vectors) = load();
-    let mut checked = 0;
     for v in &vectors {
-        let Some(item) = queue_item(v) else {
-            assert!(
-                NOT_NODE_TYPES.contains(&v.command_type.as_str()),
-                "vector `{}` has unexpected type `{}`",
-                v.name,
-                v.command_type
-            );
-            continue;
-        };
+        let item = queue_item(v);
         let nonces = NonceCache::new();
         let verified = verify_queued_command(&item, &ctx(v, &v.node_id, &key, &nonces))
             .unwrap_or_else(|e| panic!("vector `{}` rejected: {e}", v.name));
@@ -182,9 +185,7 @@ fn test_hub_vectors_pass_the_queue_verification_path() {
         );
         let payload: Value = serde_json::from_str(&v.payload).unwrap();
         assert_eq!(verified.args, payload, "args differ for `{}`", v.name);
-        checked += 1;
     }
-    assert!(checked >= 1, "no vector uses a node command type");
 }
 
 #[test]
@@ -199,14 +200,12 @@ fn test_hub_vectors_fail_for_another_node_id() {
             "vector `{}` verified for a different node_id",
             v.name
         );
-        if let Some(item) = queue_item(v) {
-            let nonces = NonceCache::new();
-            assert_eq!(
-                verify_queued_command(&item, &ctx(v, other, &key, &nonces)).unwrap_err(),
-                QueueSignatureError::Invalid,
-                "vector `{}` accepted on a different node",
-                v.name
-            );
-        }
+        let nonces = NonceCache::new();
+        assert_eq!(
+            verify_queued_command(&queue_item(v), &ctx(v, other, &key, &nonces)).unwrap_err(),
+            QueueSignatureError::Invalid,
+            "vector `{}` accepted on a different node",
+            v.name
+        );
     }
 }

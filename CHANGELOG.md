@@ -21,11 +21,21 @@ this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
   `nexus-cmd-v1` vectors are vendored unchanged from hub commit `d5228b4b`
   (`tests/fixtures/hub/`). `hub_vectors_tests` rebuilds every message with
   `queue_message`, compares the payload hash, verifies the signature with
-  the RFC 8032 test key and runs vectors with node command types through
+  the RFC 8032 test key and runs every vector through
   `verify_queued_command`; a different `node_id` must fail.
 
 ### Fixed
 
+- **One unknown command type no longer blocks the whole queue.** The
+  poller parsed `.../compose/commands/pending` as one typed list, so a
+  single item with a type the node does not implement (or any malformed
+  item) failed the whole poll and no command on that node ran until the
+  hub removed it. Items are now parsed one by one: an unknown type is
+  signature-checked like any other command (the raw wire type is part of
+  the signed message) and then reported as `failed` with
+  `unsupported command type: <type>`, never executed; a structurally
+  broken item with an id is reported as `malformed command: ...`; items
+  without an id are skipped with a warning. Other items run as before.
 - **Release image builds use the Blacksmith builder again.**
   `useblacksmith/setup-docker-builder` 2.3.0 requires a `cache-key`; without
   it the builder setup failed and builds fell back to the local builder.

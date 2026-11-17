@@ -239,6 +239,11 @@ nexus-cmd-v1
 - A command that carries a signature is always verified, also with
   enforcement off; an invalid signature is rejected.
 - `payload` takes precedence over the legacy `args` object.
+- Supported types: `get_file`, `put_file`, `activate`, `get_logs_snapshot`,
+  `validate_yaml`. Any other type is signature-checked like the rest and then
+  reported as `failed` with `unsupported command type: <type>`; it is never
+  executed. Items are handled one by one, so one unknown or malformed item
+  does not hold up the others.
 
 The heartbeat reports the enforcement state as `command_signatures`:
 `enforced`, `off`, or `key_missing` (enforcement on but no verifying key; the

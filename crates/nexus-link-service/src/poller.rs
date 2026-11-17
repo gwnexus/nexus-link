@@ -117,25 +117,40 @@ pub async fn poll_and_execute(state: &Arc<AppState>) -> anyhow::Result<Option<u6
         return Ok(poll_interval_hint);
     }
 
-    let commands: Vec<ComposeCommandItem> = resp.json().await?;
+    // Items are parsed one by one: a single malformed item must not block
+    // every other command on this node.
+    let items: Vec<serde_json::Value> = resp.json().await?;
 
-    if commands.is_empty() {
+    if items.is_empty() {
         return Ok(poll_interval_hint);
     }
 
-    info!(count = commands.len(), "Received compose commands");
+    info!(count = items.len(), "Received compose commands");
 
     let ctx = CommandContext::from_state(state);
 
     // ── Verify and execute each command sequentially ───────────────────────
-    for cmd in commands {
-        let result = handle_command(&cmd, &ctx).await;
+    for item in items {
+        let (id, result) = match parse_item(item) {
+            ParsedItem::Command(cmd) => {
+                let result = handle_command(&cmd, &ctx).await;
+                (cmd.id, result)
+            }
+            ParsedItem::Malformed { id, error } => {
+                warn!(id = %id, error = %error, "Rejected malformed queued command");
+                (id, failed(error))
+            }
+            ParsedItem::NoId => {
+                warn!("Skipping queued command without an id; cannot report a result");
+                continue;
+            }
+        };
 
         // Report result back to Nexus backend
         let patch_resp = client
             .patch(format!(
                 "{}/api/nodes/{}/compose/commands/{}",
-                base_url, node_id, cmd.id
+                base_url, node_id, id
             ))
             .bearer_auth(cmd_token)
             .json(&result)
@@ -144,18 +159,58 @@ pub async fn poll_and_execute(state: &Arc<AppState>) -> anyhow::Result<Option<u6
 
         match patch_resp {
             Ok(r) if r.status().is_success() => {
-                info!(id = %cmd.id, status = ?result.status, "Command result reported");
+                info!(id = %id, status = ?result.status, "Command result reported");
             }
             Ok(r) => {
-                warn!(id = %cmd.id, status = %r.status(), "Failed to report command result");
+                warn!(id = %id, status = %r.status(), "Failed to report command result");
             }
             Err(e) => {
-                error!(id = %cmd.id, "Failed to send command result: {}", e);
+                error!(id = %id, "Failed to send command result: {}", e);
             }
         }
     }
 
     Ok(poll_interval_hint)
+}
+
+/// One entry of the pending list after parsing.
+#[derive(Debug)]
+pub enum ParsedItem {
+    Command(ComposeCommandItem),
+    /// Not a valid command item, but it has an id, so the failure can be
+    /// reported to the hub.
+    Malformed {
+        id: String,
+        error: String,
+    },
+    /// No usable id: nothing to report to.
+    NoId,
+}
+
+/// Parse one pending item. Unknown command types parse fine (see
+/// `ComposeCommandType::Unknown`); this only catches structurally broken items.
+pub fn parse_item(item: serde_json::Value) -> ParsedItem {
+    let id = item
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+    match (serde_json::from_value::<ComposeCommandItem>(item), id) {
+        (Ok(cmd), Some(_)) => ParsedItem::Command(cmd),
+        (Err(e), Some(id)) => ParsedItem::Malformed {
+            id,
+            error: format!("malformed command: {e}"),
+        },
+        (_, None) => ParsedItem::NoId,
+    }
+}
+
+fn failed(error: String) -> ComposeCommandResult {
+    ComposeCommandResult {
+        status: ComposeCommandStatus::Failed,
+        result: None,
+        error: Some(error),
+    }
 }
 
 /// Verify a queued command and execute it only if verification passes.
@@ -191,12 +246,16 @@ pub async fn handle_command(
     debug!(id = %cmd.id, type_ = cmd.command_type.as_str(), signed = verified.signed, "Executing command");
 
     let args = &verified.args;
-    match cmd.command_type {
+    match &cmd.command_type {
         ComposeCommandType::GetFile => execute_get_file(&ctx.compose_dir, ctx.extra_extensions),
         ComposeCommandType::PutFile => execute_put_file(args, &ctx.compose_dir),
         ComposeCommandType::Activate => execute_activate(&ctx.compose_dir).await,
         ComposeCommandType::GetLogsSnapshot => execute_logs_snapshot(args, &ctx.compose_dir).await,
         ComposeCommandType::ValidateYaml => execute_validate_yaml(args),
+        ComposeCommandType::Unknown(name) => {
+            warn!(id = %cmd.id, type_ = name.as_str(), "Rejected unsupported command type");
+            failed(format!("unsupported command type: {name}"))
+        }
     }
 }
 
@@ -689,5 +748,69 @@ mod tests {
         let result = handle_command(&cmd, &ctx(dir.path(), true, Some(&vk), &nonces)).await;
         assert_eq!(result.status, ComposeCommandStatus::Completed);
         assert_eq!(result.result.unwrap()["valid"], false);
+    }
+
+    #[tokio::test]
+    async fn signed_unknown_type_is_reported_unsupported_and_not_executed() {
+        let dir = tempfile::tempdir().unwrap();
+        let vk = key().verifying_key();
+        let nonces = NonceCache::new();
+        let cmd = signed(ComposeCommandType::Unknown("compose_ps".into()), "{}", "n1");
+        let result = handle_command(&cmd, &ctx(dir.path(), true, Some(&vk), &nonces)).await;
+        assert_eq!(result.status, ComposeCommandStatus::Failed);
+        assert_eq!(
+            result.error.as_deref(),
+            Some("unsupported command type: compose_ps")
+        );
+        assert!(result.result.is_none());
+    }
+
+    #[tokio::test]
+    async fn forged_unknown_type_reports_the_signature_error_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let vk = key().verifying_key();
+        let nonces = NonceCache::new();
+        let mut cmd = signed(ComposeCommandType::Unknown("read_file".into()), "{}", "n1");
+        cmd.payload = Some(r#"{"path":"/etc/shadow"}"#.into());
+        let result = handle_command(&cmd, &ctx(dir.path(), true, Some(&vk), &nonces)).await;
+        assert_eq!(result.error.as_deref(), Some("signature: invalid"));
+    }
+
+    #[test]
+    fn mixed_pending_list_parses_item_by_item() {
+        let list: Vec<serde_json::Value> = serde_json::from_str(
+            r#"[
+                {"id":"a","type":"get_file"},
+                {"id":"b","type":"compose_ps","payload":"{}"},
+                {"id":"c","type":42},
+                {"type":"activate"},
+                {"id":"","type":"activate"},
+                {"id":"d","type":"validate_yaml","args":{"content":"a: 1"}}
+            ]"#,
+        )
+        .unwrap();
+        let parsed: Vec<ParsedItem> = list.into_iter().map(parse_item).collect();
+
+        assert!(matches!(&parsed[0], ParsedItem::Command(c)
+            if c.id == "a" && c.command_type == ComposeCommandType::GetFile));
+        assert!(matches!(&parsed[1], ParsedItem::Command(c)
+            if c.id == "b" && c.command_type == ComposeCommandType::Unknown("compose_ps".into())));
+        assert!(matches!(&parsed[2], ParsedItem::Malformed { id, error }
+            if id == "c" && error.starts_with("malformed command:")));
+        assert!(matches!(parsed[3], ParsedItem::NoId));
+        assert!(matches!(parsed[4], ParsedItem::NoId));
+        assert!(matches!(&parsed[5], ParsedItem::Command(c)
+            if c.id == "d" && c.command_type == ComposeCommandType::ValidateYaml));
+    }
+
+    #[test]
+    fn unknown_type_keeps_its_wire_name() {
+        let t: ComposeCommandType = serde_json::from_str(r#""read_file""#).unwrap();
+        assert_eq!(t, ComposeCommandType::Unknown("read_file".into()));
+        assert_eq!(t.as_str(), "read_file");
+        assert_eq!(serde_json::to_string(&t).unwrap(), r#""read_file""#);
+        // Known names never fall into Unknown
+        let k: ComposeCommandType = serde_json::from_str(r#""put_file""#).unwrap();
+        assert_eq!(k, ComposeCommandType::PutFile);
     }
 }

@@ -83,17 +83,24 @@ pub enum ComposeCommandType {
     Activate,
     GetLogsSnapshot,
     ValidateYaml,
+    /// A type this node does not implement, kept with its wire name so the
+    /// item still deserializes (one unknown item must not fail the whole
+    /// pending list), its signature can be verified, and it can be reported
+    /// as failed. Never executed.
+    #[serde(untagged)]
+    Unknown(String),
 }
 
 impl ComposeCommandType {
     /// Wire name, as used in the JSON `type` field and the signed message.
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             ComposeCommandType::GetFile => "get_file",
             ComposeCommandType::PutFile => "put_file",
             ComposeCommandType::Activate => "activate",
             ComposeCommandType::GetLogsSnapshot => "get_logs_snapshot",
             ComposeCommandType::ValidateYaml => "validate_yaml",
+            ComposeCommandType::Unknown(name) => name,
         }
     }
 }
