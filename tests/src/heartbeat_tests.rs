@@ -1,8 +1,13 @@
+use std::collections::HashMap;
+
 use nexus_link_core::heartbeat::{
     HeartbeatPayload, HeartbeatResponse, MAX_MODEL_ID_LEN, MAX_MODELS, ModelEntry,
-    is_valid_model_id, models_endpoint, parse_model_list,
+    apply_backing_models, is_valid_model_id, model_info_endpoint, models_endpoint,
+    parse_model_info, parse_model_list, strip_provider_prefix,
 };
 use serde_json::json;
+
+const QWEN: &str = "Qwen/Qwen3.6-35B-A3B-NVFP4";
 
 #[test]
 fn test_payload_without_models_omits_field() {
@@ -22,10 +27,7 @@ fn test_payload_with_empty_models_sends_empty_list() {
 fn test_payload_serializes_hub_format() {
     let payload = HeartbeatPayload::online(Some(vec![
         ModelEntry::Id("nexus-coder-long".into()),
-        ModelEntry::Detailed {
-            id: "nexus-review-local".into(),
-            max_model_len: 131072,
-        },
+        ModelEntry::new("nexus-review-local".into(), Some(131072), None),
     ]));
     let body = serde_json::to_value(payload).unwrap();
     assert_eq!(
@@ -63,12 +65,10 @@ fn test_parse_vllm_model_list_with_max_model_len() {
         {"id":"Qwen/Qwen3-Coder-30B","object":"model","owned_by":"vllm","max_model_len":131072,"root":"/models/qwen"}
     ]}"#;
     let models = parse_model_list(body).unwrap();
+    // An absolute local path as `root` is not reported as backing model.
     assert_eq!(
-        models,
-        vec![ModelEntry::Detailed {
-            id: "Qwen/Qwen3-Coder-30B".into(),
-            max_model_len: 131072
-        }]
+        serde_json::to_value(&models).unwrap(),
+        json!([{ "id": "Qwen/Qwen3-Coder-30B", "max_model_len": 131072 }])
     );
 }
 
@@ -162,4 +162,120 @@ fn test_heartbeat_response_models_recorded() {
     assert_eq!(r.models_recorded, Some(2));
     let r: HeartbeatResponse = serde_json::from_str(r#"{"ok":true}"#).unwrap();
     assert_eq!(r.models_recorded, None);
+}
+
+#[test]
+fn test_model_entry_new_without_details_is_plain_id() {
+    let e = ModelEntry::new("a".into(), None, None);
+    assert_eq!(e, ModelEntry::Id("a".into()));
+    // Zero length and invalid backing model count as unknown.
+    let e = ModelEntry::new("a".into(), Some(0), Some("bad name".into()));
+    assert_eq!(e, ModelEntry::Id("a".into()));
+}
+
+#[test]
+fn test_model_entry_serializes_only_known_details() {
+    let e = ModelEntry::new("a".into(), None, Some(QWEN.into()));
+    assert_eq!(
+        serde_json::to_value(&e).unwrap(),
+        json!({ "id": "a", "backing_model": QWEN })
+    );
+    let e = ModelEntry::new("a".into(), Some(8192), Some(QWEN.into()));
+    assert_eq!(
+        serde_json::to_value(&e).unwrap(),
+        json!({ "id": "a", "max_model_len": 8192, "backing_model": QWEN })
+    );
+}
+
+#[test]
+fn test_parse_vllm_model_list_reports_root_as_backing_model() {
+    let body = json!({ "data": [
+        { "id": "coder", "owned_by": "vllm", "max_model_len": 131072, "root": QWEN }
+    ]})
+    .to_string();
+    let models = parse_model_list(&body).unwrap();
+    assert_eq!(models[0].max_model_len(), Some(131072));
+    assert_eq!(models[0].backing_model(), Some(QWEN));
+}
+
+#[test]
+fn test_model_info_endpoint() {
+    assert_eq!(
+        model_info_endpoint("http://127.0.0.1:4000"),
+        "http://127.0.0.1:4000/model/info"
+    );
+    assert_eq!(
+        model_info_endpoint("http://127.0.0.1:4000/v1/"),
+        "http://127.0.0.1:4000/model/info"
+    );
+}
+
+#[test]
+fn test_strip_provider_prefix() {
+    assert_eq!(strip_provider_prefix(&format!("hosted_vllm/{QWEN}")), QWEN);
+    assert_eq!(strip_provider_prefix("openai/gpt-4o"), "gpt-4o");
+    // Unknown first segment is an HF org, not a provider.
+    assert_eq!(strip_provider_prefix(QWEN), QWEN);
+    assert_eq!(strip_provider_prefix("gpt-4o"), "gpt-4o");
+    assert_eq!(strip_provider_prefix("openai/"), "openai/");
+}
+
+#[test]
+fn test_parse_model_info_maps_aliases_without_secrets() {
+    let body = json!({ "data": [
+        { "model_name": "nexus-coder-long", "litellm_params": {
+            "model": format!("hosted_vllm/{QWEN}"),
+            "api_base": "http://10.0.0.2:8000/v1", "api_key": "sk-test" } },
+        { "model_name": "nexus-review-local", "litellm_params": { "model": format!("openai/{QWEN}") } },
+        { "model_name": "nexus-architect-local", "litellm_params": { "model": format!("hosted_vllm/{QWEN}") } },
+        { "model_name": "no-params" }
+    ]})
+    .to_string();
+    let info = parse_model_info(&body).unwrap();
+    assert_eq!(info.len(), 3);
+    assert!(info.values().all(|b| b == QWEN));
+    let dump = format!("{info:?}");
+    assert!(!dump.contains("sk-test") && !dump.contains("10.0.0.2"));
+}
+
+#[test]
+fn test_parse_model_info_disagreeing_deployments_are_unknown() {
+    let body = json!({ "data": [
+        { "model_name": "lb", "litellm_params": { "model": "hosted_vllm/org/one" } },
+        { "model_name": "lb", "litellm_params": { "model": "hosted_vllm/org/two" } },
+        { "model_name": "same", "litellm_params": { "model": "hosted_vllm/org/one" } },
+        { "model_name": "same", "litellm_params": { "model": "openai/org/one" } }
+    ]})
+    .to_string();
+    let info = parse_model_info(&body).unwrap();
+    assert!(!info.contains_key("lb"));
+    assert_eq!(info["same"], "org/one");
+}
+
+#[test]
+fn test_parse_model_info_rejects_non_litellm_body() {
+    assert!(parse_model_info(r#"{"detail":"Not Found"}"#).is_err());
+    assert!(parse_model_info("not json").is_err());
+}
+
+#[test]
+fn test_apply_backing_models() {
+    let models = vec![
+        ModelEntry::new("nexus-coder-long".into(), Some(131072), None),
+        ModelEntry::new("vllm-served".into(), None, Some("org/root".into())),
+        ModelEntry::Id("unknown".into()),
+    ];
+    let info = HashMap::from([
+        ("nexus-coder-long".to_string(), QWEN.to_string()),
+        ("vllm-served".to_string(), "org/other".to_string()),
+    ]);
+    let out = apply_backing_models(models, &info);
+    assert_eq!(
+        serde_json::to_value(&out).unwrap(),
+        json!([
+            { "id": "nexus-coder-long", "max_model_len": 131072, "backing_model": QWEN },
+            { "id": "vllm-served", "backing_model": "org/root" },
+            "unknown"
+        ])
+    );
 }

@@ -1,10 +1,12 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use nexus_link_core::config::Config;
 use nexus_link_core::heartbeat::{
-    HeartbeatPayload, HeartbeatResponse, ModelEntry, models_endpoint, parse_model_list,
+    HeartbeatPayload, HeartbeatResponse, ModelEntry, apply_backing_models, model_info_endpoint,
+    models_endpoint, parse_model_info, parse_model_list,
 };
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Timeout for the local runtime's model list.
 const MODELS_TIMEOUT: Duration = Duration::from_secs(5);
@@ -40,10 +42,70 @@ pub async fn fetch_models(client: &reqwest::Client, config: &Config) -> Option<V
             return None;
         }
     };
-    match parse_model_list(&body) {
-        Ok(models) => Some(models),
+    let models = match parse_model_list(&body) {
+        Ok(models) => models,
         Err(e) => {
             warn!("Model list is not an OpenAI-compatible response: {}", e);
+            return None;
+        }
+    };
+
+    // vLLM reports the backing model as `root` in /v1/models. LiteLLM does
+    // not; ask its /model/info for the aliases instead.
+    if models.is_empty() || models.iter().any(|m| m.backing_model().is_some()) {
+        return Some(models);
+    }
+    match fetch_model_info(client, config, base).await {
+        Some(info) => Some(apply_backing_models(models, &info)),
+        None => Some(models),
+    }
+}
+
+/// Query LiteLLM's `/model/info` for `alias -> backing model`.
+///
+/// Returns `None` when the endpoint is missing (plain vLLM), not readable with
+/// the configured key, or not a LiteLLM response. The heartbeat then reports
+/// the models without `backing_model`.
+async fn fetch_model_info(
+    client: &reqwest::Client,
+    config: &Config,
+    base: &str,
+) -> Option<HashMap<String, String>> {
+    let mut req = client
+        .get(model_info_endpoint(base))
+        .timeout(MODELS_TIMEOUT);
+    if let Some(key) = config.agent.models_api_key.as_deref() {
+        req = req.bearer_auth(key);
+    }
+
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            debug!("Model info unavailable: {}", e.without_url());
+            return None;
+        }
+    };
+    let status = resp.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        debug!("Runtime has no /model/info; backing models unknown");
+        return None;
+    }
+    if !status.is_success() {
+        warn!(%status, "Model info rejected by runtime; check that agent.models_api_key may read /model/info");
+        return None;
+    }
+
+    let body = match resp.text().await {
+        Ok(b) => b,
+        Err(e) => {
+            debug!("Model info unreadable: {}", e.without_url());
+            return None;
+        }
+    };
+    match parse_model_info(&body) {
+        Ok(info) => Some(info),
+        Err(e) => {
+            debug!("Model info is not a LiteLLM response: {}", e);
             None
         }
     }

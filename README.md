@@ -305,11 +305,17 @@ When `agent.models_url` points to the node's local OpenAI-compatible runtime
 `GET <models_url>/v1/models` on the node itself:
 
 ```json
-{ "status": "online", "models": ["nexus-coder-long", { "id": "nexus-review-local", "max_model_len": 131072 }] }
+{ "status": "online", "models": ["nexus-embed", { "id": "nexus-review-local", "max_model_len": 131072, "backing_model": "Qwen/Qwen3.6-35B-A3B-NVFP4" }] }
 ```
 
 - Ids are exactly what clients send as `model` (LiteLLM: the aliases);
   `max_model_len` is included when the runtime reports it (vLLM).
+- `backing_model` (v0.21.1+) names the physical model behind an id, so the hub
+  can group aliases served by one runtime. LiteLLM: read from
+  `GET <models_url>/model/info` (`litellm_params.model` without the provider
+  prefix; the key in `models_api_key` must be allowed to read it). vLLM: the
+  model's `root`, unless it is an absolute local path. Omitted when unknown;
+  endpoints and keys from `/model/info` are never reported.
 - At most 50 entries; ids outside `[A-Za-z0-9._:/@+-]{1,200}` and duplicates are dropped.
 - If the runtime cannot be queried, `models` is omitted, so the hub keeps the
   last known inventory. An empty list means the runtime serves nothing.

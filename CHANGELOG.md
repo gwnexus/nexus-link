@@ -13,6 +13,32 @@ it is built against (ADR-0006): nexus-link `0.21.x` targets Nexus Hub `0.21.x`.
 this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
 0.11.0 used independent numbering.
 
+## [0.21.1] - 2026-11-17
+
+### Added
+
+- **Backing model per heartbeat model entry (`backing_model`).** Object
+  entries in the heartbeat `models` field may now carry the physical model
+  behind an alias, so the hub can group LiteLLM aliases that share one runtime
+  (Dispatch 2ac05e75). Sources:
+  - LiteLLM: `GET <models_url>/model/info`, `litellm_params.model` of each
+    alias with the provider prefix (`hosted_vllm/`, `openai/`, ...) stripped.
+    Only queried when `/v1/models` carries no `root`. If an alias has several
+    deployments with different models, the field is omitted.
+  - vLLM: `root` from `/v1/models`; absolute local paths are not reported.
+  - Same id rules as `id`; omitted when unknown. `api_base`, keys and all other
+    `litellm_params` are never read into the payload.
+  - A missing or rejected `/model/info` never drops the inventory; the models
+    are reported without `backing_model` (rejection is logged as a warning).
+- `nexus_link_core::heartbeat`: `ModelEntry::new`, `model_info_endpoint`,
+  `parse_model_info`, `strip_provider_prefix`, `apply_backing_models`, with 10
+  new tests.
+
+### Changed
+
+- `ModelEntry::Detailed` now has optional `max_model_len` and `backing_model`
+  fields (both skipped when `None`); use `ModelEntry::new` to build entries.
+
 ## [0.21.0] - 2026-11-16
 
 Requires Nexus Hub >= 0.21.0 for the model inventory; older hubs ignore the new
