@@ -124,9 +124,12 @@ pub fn command_signature_state(config: &Config) -> SignatureState {
 pub async fn send_heartbeat(client: &reqwest::Client, config: &Config) -> anyhow::Result<()> {
     let models = fetch_models(client, config).await;
     let signatures = command_signature_state(config);
+    let wake_listener = nexus_link_core::wake::state_dir_from_env()
+        .and_then(|dir| nexus_link_core::wake::read_state(&dir, std::time::SystemTime::now()));
     let payload = HeartbeatPayload::online(models)
         .with_command_signatures(signatures)
-        .with_compose_writable(config.compose.writable);
+        .with_compose_writable(config.compose.writable)
+        .with_wake_listener(wake_listener);
 
     let url = format!(
         "{}/api/nodes/{}/heartbeat",
@@ -152,6 +155,7 @@ pub async fn send_heartbeat(client: &reqwest::Client, config: &Config) -> anyhow
         models_recorded = response.models_recorded,
         command_signatures = ?signatures,
         compose_writable = config.compose.writable,
+        wake_listener = wake_listener.map(|s| s.as_str()),
         "Heartbeat sent"
     );
 

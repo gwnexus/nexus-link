@@ -20,7 +20,9 @@
 //! (`enforced`, `off` or `key_missing`), so the hub can gate runtime
 //! mutation on signature enforcement (see `crate::signing`). It also reports
 //! `compose_writable` (`compose.writable`): `false` means the node rejects
-//! compose writes, whatever the signature state.
+//! compose writes, whatever the signature state. Since 0.21.5 it reports
+//! `wake_listener` (`connected`, `disconnected` or `unconfigured`), the state
+//! of the command service's PG LISTEN wake-up channel (`crate::wake`).
 
 use std::collections::{HashMap, HashSet};
 
@@ -117,6 +119,10 @@ pub struct HeartbeatPayload {
     /// this is not `false` (and signatures are enforced).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compose_writable: Option<bool>,
+    /// State of the PG LISTEN wake-up channel (`crate::wake`); omitted when
+    /// unknown (no systemd state directory).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wake_listener: Option<crate::wake::WakeListenerState>,
 }
 
 impl HeartbeatPayload {
@@ -127,6 +133,7 @@ impl HeartbeatPayload {
             models,
             command_signatures: None,
             compose_writable: None,
+            wake_listener: None,
         }
     }
 
@@ -139,6 +146,12 @@ impl HeartbeatPayload {
     /// Add whether the node may change its compose stack.
     pub fn with_compose_writable(mut self, writable: bool) -> Self {
         self.compose_writable = Some(writable);
+        self
+    }
+
+    /// Add the wake-up listener state, if known.
+    pub fn with_wake_listener(mut self, state: Option<crate::wake::WakeListenerState>) -> Self {
+        self.wake_listener = state;
         self
     }
 }

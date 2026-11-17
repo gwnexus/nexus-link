@@ -87,17 +87,13 @@ async fn main() -> anyhow::Result<()> {
         // Shared wake signal: PG LISTEN notifications trigger immediate poll
         let wake = Arc::new(tokio::sync::Notify::new());
 
-        // Start PG LISTEN/NOTIFY listener (no-op if database_url not configured)
-        if config.api.database_url.is_some() {
-            let pg_state = Arc::clone(&state);
-            let pg_wake = Arc::clone(&wake);
-            tokio::spawn(async move {
-                pg_listener::run(pg_state, pg_wake).await;
-            });
-            info!("PG LISTEN/NOTIFY wake-up channel enabled");
-        } else {
-            info!("PG LISTEN/NOTIFY not configured — HTTP-only polling");
-        }
+        // PG LISTEN/NOTIFY wake-up; logs and reports `unconfigured` itself
+        // when there is no database_url.
+        let pg_state = Arc::clone(&state);
+        let pg_wake = Arc::clone(&wake);
+        tokio::spawn(async move {
+            pg_listener::run(pg_state, pg_wake).await;
+        });
 
         // Poll loop: runs on interval OR immediately when woken by PG NOTIFY
         let poll_wake = Arc::clone(&wake);

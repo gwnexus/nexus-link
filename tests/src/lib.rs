@@ -23,3 +23,5 @@ mod telemetry_tests;
 mod token_tests;
 #[cfg(test)]
 mod types_tests;
+#[cfg(test)]
+mod wake_tests;

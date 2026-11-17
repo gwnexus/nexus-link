@@ -9,3 +9,4 @@ pub mod systemd;
 pub mod telemetry;
 pub mod token;
 pub mod types;
+pub mod wake;

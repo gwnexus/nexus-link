@@ -518,6 +518,25 @@ The HTTP poll loop respects the `X-Poll-Interval` response header from the
 backend: 2 s when commands are pending (active mode), 30 s when idle.
 PG NOTIFY bypasses the interval entirely for instant response.
 
+> Before 0.21.5 the listener hung right after connecting on every node (no
+> error, no wake-up), so commands were only picked up by the idle poll.
+
+How the listener works (0.21.5+):
+
+- After `LISTEN node_cmd_<node_id>` (node id lowercase) the service sends a
+  probe notification to its own channel. If it does not come back, the DSN
+  cannot deliver notifications, typically the Supabase **transaction pooler**
+  (port 6543); use the session pooler or a direct connection. The service
+  logs `PG LISTEN self-test failed` and retries every 5 minutes.
+- A `SELECT 1` health check every 30 s plus TCP keepalives detect dead
+  connections; it reconnects with backoff (1 s to 30 s).
+- The state is logged at start and on every change (`PG LISTEN wake-up
+  state`), never the DSN, and reported in the heartbeat as `wake_listener`:
+  `connected`, `disconnected` or `unconfigured`. The service writes it to
+  `$STATE_DIRECTORY/wake_listener`, the agent reads it from there (both
+  units of a profile share the systemd state directory; outside systemd the
+  field is omitted).
+
 **Fallback:** If the PG connection drops, the service continues with HTTP
 polling and reconnects with exponential backoff (1 s to 30 s max).
 

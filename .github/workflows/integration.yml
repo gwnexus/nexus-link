@@ -41,6 +41,42 @@ jobs:
       - name: Run unit tests
         run: cargo test --all
 
+  # PG LISTEN/NOTIFY wake-up against a real PostgreSQL (hub ADR-0071).
+  # The listener once hung silently on every node; these tests catch that.
+  pg-listener:
+    name: PG LISTEN wake-up
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:a77aa70e641402a21411b92b721c58d10f23b50ae5fdd2333efd22d166e1e5f7
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install
+          rustc --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Run live listener tests
+        env:
+          # Throwaway CI database, not a secret.
+          NEXUS_LINK_TEST_PG_URL: postgres://postgres:test@127.0.0.1:5432/postgres
+        run: cargo test -p nexus-link-service -- --ignored pg_listener::tests::live
+
   # Integration tests that simulate the full CLI flow
   # These run only on Linux (the target deployment platform)
   integration:

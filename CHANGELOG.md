@@ -17,13 +17,19 @@ this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
 
 ### Added
 
+- **Heartbeat `wake_listener`**: `connected`, `disconnected` or
+  `unconfigured`, the state of the PG LISTEN wake-up channel. The service
+  writes it to `$STATE_DIRECTORY/wake_listener`; the agent reads it (a
+  `connected` older than 120 s counts as `disconnected`). Omitted outside
+  systemd.
+- **CI job `pg-listener`** runs the live listener tests (notify, reconnect
+  after the backend is killed, probe does not wake) against PostgreSQL 17.
 - **Hub signing test vectors in CI** (ADR-0007). The hub's
   `nexus-cmd-v1` vectors are vendored unchanged from hub commit `d5228b4b`
   (`tests/fixtures/hub/`). `hub_vectors_tests` rebuilds every message with
   `queue_message`, compares the payload hash, verifies the signature with
   the RFC 8032 test key and runs every vector through
   `verify_queued_command`; a different `node_id` must fail.
-
 - **Read-only compose mode** (`compose.writable`, default `true`). With
   `false`, `put_file` and `activate` are rejected on the queue (`failed`,
   `compose: read-only ...`, checked after the signature) and on the HTTP
@@ -35,6 +41,17 @@ this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
 
 ### Fixed
 
+- **PG LISTEN wake-up never worked** (hub ADR-0071, Dispatch 3b634627).
+  The service awaited `LISTEN` before anything drove the PostgreSQL
+  connection, so the listener hung right after connecting on every node:
+  no error, no reconnect, no wake-up; commands waited for the idle poll
+  (24 s seen on staging). The connection now runs in its own task. After
+  `LISTEN` the node sends itself a probe notification and only reports
+  `connected` when it arrives, so a DSN that drops notifications (e.g. the
+  Supabase transaction pooler, port 6543, also warned about at start)
+  is detected. A 30 s `SELECT 1` health check and TCP keepalives detect
+  dead connections; reconnect with backoff 1 to 30 s. The channel uses
+  the lowercase node id. State changes are logged without the DSN.
 - **One unknown command type no longer blocks the whole queue.** The
   poller parsed `.../compose/commands/pending` as one typed list, so a
   single item with a type the node does not implement (or any malformed
