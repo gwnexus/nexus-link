@@ -257,9 +257,8 @@ fn generate_systemd_units(mode: SystemdMode) -> anyhow::Result<()> {
     let agent_svc = agent_service_name();
     let service_svc = service_service_name();
     let profile = nexus_link_core::config::active_profile();
-    let compose_dir = Config::load()
-        .map(|c| c.compose.dir)
-        .unwrap_or_else(|_| PathBuf::from("/opt/dgx-llm"));
+    let compose = Config::load().map(|c| c.compose).unwrap_or_default();
+    let compose_dir = compose.dir;
 
     // The dedicated system user exists once `nexus-link setup` has created
     // the system config dir.
@@ -283,6 +282,7 @@ fn generate_systemd_units(mode: SystemdMode) -> anyhow::Result<()> {
         service_bin: &service_bin,
         config_path: &config_path,
         compose_dir: &compose_dir,
+        compose_writable: compose.writable,
         user,
         scope: match mode {
             SystemdMode::System => UnitScope::System,

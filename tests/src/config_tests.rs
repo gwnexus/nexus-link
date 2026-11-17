@@ -112,6 +112,20 @@ fn test_config_default_compose() {
     let compose = ComposeConfig::default();
     assert_eq!(compose.dir.to_str().unwrap(), "/opt/dgx-llm");
     assert!(compose.extra_extensions.contains(&".env".to_string()));
+    assert!(
+        compose.writable,
+        "compose is writable unless configured otherwise"
+    );
+}
+
+#[test]
+fn test_compose_writable_defaults_true_when_missing_and_parses_false() {
+    // Existing configs have no `writable` key: they must stay writable.
+    let old: ComposeConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+    assert!(old.writable);
+    let ro: ComposeConfig =
+        serde_json::from_value(serde_json::json!({ "writable": false })).unwrap();
+    assert!(!ro.writable);
 }
 
 #[test]
@@ -215,6 +229,7 @@ fn test_config_roundtrip_with_custom_compose_dir() {
             cmd_token: Some("nxs_cmd_testtoken".to_string()),
             signing_public_key: None,
             require_signatures: false,
+            writable: true,
         },
     };
 

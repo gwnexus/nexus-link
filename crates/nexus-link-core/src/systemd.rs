@@ -39,6 +39,9 @@ pub struct UnitParams<'a> {
     pub service_bin: &'a Path,
     pub config_path: &'a Path,
     pub compose_dir: &'a Path,
+    /// `compose.writable`; without it the service gets no write access to
+    /// `compose_dir`.
+    pub compose_writable: bool,
     pub user: UnitUser,
     pub scope: UnitScope,
 }
@@ -63,14 +66,20 @@ pub fn render_agent_unit(p: &UnitParams<'_>) -> String {
     )
 }
 
-/// Service unit (command channel). Writes the compose dir (`put_file`).
+/// Service unit (command channel). Writes the compose dir (`put_file`)
+/// unless the profile is compose read-only (`compose.writable = false`).
 pub fn render_service_unit(p: &UnitParams<'_>) -> String {
+    let writable: &[&Path] = if p.compose_writable {
+        &[p.compose_dir]
+    } else {
+        &[]
+    };
     render(
         p,
         "Nexus Link Command Service",
         p.service_bin,
         "nexus_link_service=info",
-        &[p.compose_dir],
+        writable,
     )
 }
 
@@ -175,6 +184,7 @@ mod tests {
             service_bin: Path::new("/usr/local/bin/nexus-link-service"),
             config_path: &config,
             compose_dir: Path::new("/opt/dgx-llm"),
+            compose_writable: true,
             user,
             scope,
         };
@@ -203,6 +213,24 @@ mod tests {
             assert!(!unit.contains("WorkingDirectory=/etc"));
         }
         assert!(service.contains("Description=Nexus Link Command Service (staging)"));
+    }
+
+    #[test]
+    fn read_only_profile_gets_no_write_access_to_the_compose_dir() {
+        let p = UnitParams {
+            profile: "staging",
+            agent_bin: Path::new("/usr/local/bin/nexus-link-agent"),
+            service_bin: Path::new("/usr/local/bin/nexus-link-service"),
+            config_path: Path::new("/etc/nexus-link/config.staging.toml"),
+            compose_dir: Path::new("/opt/dgx-llm"),
+            compose_writable: false,
+            user: UnitUser::Dedicated,
+            scope: UnitScope::System,
+        };
+        let service = render_service_unit(&p);
+        assert!(!service.contains("ReadWritePaths"));
+        assert!(service.contains("ProtectSystem=strict"));
+        assert!(service.contains("StateDirectory=nexus-link/staging"));
     }
 
     #[test]

@@ -83,6 +83,7 @@ pub async fn show() -> anyhow::Result<()> {
         "  require_signatures = {}",
         config.compose.require_signatures
     );
+    println!("  writable         = {}", config.compose.writable);
 
     Ok(())
 }
@@ -214,6 +215,17 @@ pub async fn set(key: String, value: String) -> anyhow::Result<()> {
             config.compose.require_signatures = v;
             println!("  compose.require_signatures = {}", v);
         }
+        "compose.writable" => {
+            let v: bool = value
+                .parse()
+                .map_err(|_| anyhow::anyhow!("Expected true or false"))?;
+            config.compose.writable = v;
+            println!("  compose.writable = {}", v);
+            println!(
+                "  Re-run `nexus-link agent start` (or `nexus-link setup`) to update \
+                 the service unit's write access"
+            );
+        }
         "compose.signing_public_key" | "signing_public_key" => {
             // Next to the effective config: the first place the service and
             // agent look (config::signing_key_dirs)
@@ -245,7 +257,7 @@ pub async fn set(key: String, value: String) -> anyhow::Result<()> {
                  api.tokens.telemetry, api.tokens.command,\n  \
                  listen_addr, port, name, tags,\n  \
                  compose_dir, compose.cmd_token, compose.signing_public_key,\n  \
-                 compose.require_signatures",
+                 compose.require_signatures, compose.writable",
                 key
             );
         }
@@ -299,6 +311,7 @@ pub async fn get(key: String) -> anyhow::Result<()> {
         "compose.require_signatures" | "require_signatures" => {
             config.compose.require_signatures.to_string()
         }
+        "compose.writable" => config.compose.writable.to_string(),
         "compose.signing_public_key" | "signing_public_key" => config
             .compose
             .signing_public_key
@@ -311,7 +324,7 @@ pub async fn get(key: String) -> anyhow::Result<()> {
                  api.tokens.telemetry, api.tokens.command,\n  \
                  listen_addr, port, name, node_id, tags, token,\n  \
                  compose_dir, compose.cmd_token, compose.signing_public_key,\n  \
-                 compose.require_signatures",
+                 compose.require_signatures, compose.writable",
                 key
             );
         }

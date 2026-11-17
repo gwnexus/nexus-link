@@ -301,6 +301,19 @@ pub async fn get_compose_file(
     }))
 }
 
+/// 403 for compose writes on a node with `compose.writable = false`.
+fn ensure_writable(state: &SharedState) -> Result<(), (StatusCode, String)> {
+    if state.config.compose.writable {
+        Ok(())
+    } else {
+        warn!("Rejected compose write over HTTP on a read-only node");
+        Err((
+            StatusCode::FORBIDDEN,
+            nexus_link_core::config::COMPOSE_READ_ONLY_ERROR.to_string(),
+        ))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // PUT /api/compose/file
 // ---------------------------------------------------------------------------
@@ -309,6 +322,8 @@ pub async fn put_compose_file(
     State(state): State<SharedState>,
     Json(body): Json<PutComposeFileRequest>,
 ) -> Result<Json<PutComposeFileResponse>, (StatusCode, String)> {
+    ensure_writable(&state)?;
+
     // Validate YAML syntax before writing
     serde_yaml::from_str::<serde_yaml::Value>(&body.content).map_err(|e| {
         (
@@ -373,6 +388,8 @@ pub async fn put_compose_file(
 pub async fn activate_compose(
     State(state): State<SharedState>,
 ) -> Result<Json<ActivateComposeResponse>, (StatusCode, String)> {
+    ensure_writable(&state)?;
+
     let compose_dir = state.config.compose.dir.clone();
 
     info!(dir = %compose_dir.display(), "Running docker compose up -d");

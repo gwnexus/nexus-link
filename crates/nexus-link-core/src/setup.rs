@@ -509,9 +509,10 @@ fn install_systemd_units() -> SetupStep {
     let service_path = format!("{}/nexus-link-service.service", SYSTEMD_DIR);
 
     // Same template as `nexus-link agent start` (crate::systemd)
-    let compose_dir = config::Config::load()
-        .map(|c| c.compose.dir)
-        .unwrap_or_else(|_| PathBuf::from("/opt/dgx-llm"));
+    let compose = config::Config::load()
+        .map(|c| c.compose)
+        .unwrap_or_default();
+    let compose_dir = compose.dir;
     let agent_bin = Path::new(INSTALL_DIR).join("nexus-link-agent");
     let service_bin = Path::new(INSTALL_DIR).join("nexus-link-service");
     let config_path = Path::new(SYSTEM_CONFIG_DIR).join("config.toml");
@@ -521,6 +522,7 @@ fn install_systemd_units() -> SetupStep {
         service_bin: &service_bin,
         config_path: &config_path,
         compose_dir: &compose_dir,
+        compose_writable: compose.writable,
         user: crate::systemd::UnitUser::Dedicated,
         scope: crate::systemd::UnitScope::System,
     };

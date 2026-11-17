@@ -124,7 +124,9 @@ pub fn command_signature_state(config: &Config) -> SignatureState {
 pub async fn send_heartbeat(client: &reqwest::Client, config: &Config) -> anyhow::Result<()> {
     let models = fetch_models(client, config).await;
     let signatures = command_signature_state(config);
-    let payload = HeartbeatPayload::online(models).with_command_signatures(signatures);
+    let payload = HeartbeatPayload::online(models)
+        .with_command_signatures(signatures)
+        .with_compose_writable(config.compose.writable);
 
     let url = format!(
         "{}/api/nodes/{}/heartbeat",
@@ -149,6 +151,7 @@ pub async fn send_heartbeat(client: &reqwest::Client, config: &Config) -> anyhow
         models_sent = payload.models.as_ref().map(|m| m.len()),
         models_recorded = response.models_recorded,
         command_signatures = ?signatures,
+        compose_writable = config.compose.writable,
         "Heartbeat sent"
     );
 

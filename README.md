@@ -252,6 +252,22 @@ node rejects every command).
 > Do not enable `require_signatures` on a node before its hub signs queued
 > commands, or the command queue stops working.
 
+#### Read-only compose (`compose.writable = false`)
+
+For a profile that must not change the compose stack, typically a staging
+profile sharing the production stack on the same host:
+
+- `put_file` and `activate` are rejected, on the queue as `failed` with
+  `compose: read-only (compose.writable = false on this node)` (after the
+  signature check, so a forged command still reports `signature:`), on the
+  HTTP path with `403`. Reads (`get_file`, `get_logs_snapshot`,
+  `validate_yaml`, logs) keep working.
+- The service unit gets no `ReadWritePaths` for the compose dir (re-run
+  `nexus-link agent start` or `nexus-link setup` after changing the flag).
+- The heartbeat reports `compose_writable: false`. Hubs should allow compose
+  writes and promotion only when `command_signatures` is `enforced` **and**
+  `compose_writable` is not `false`.
+
 ---
 
 ## Multi-Profile Support (v0.11.0+)
@@ -352,6 +368,7 @@ extra_extensions   = [".env", ".conf", ".toml"]
 cmd_token          = "nxs_cmd_..."    # compose management credential
 signing_public_key = "<base64url>"    # Ed25519 verifying key (written at registration)
 require_signatures = false            # set to true to enforce signed writes
+writable           = true             # false: compose read-only (no put_file/activate)
 ```
 
 ### Config management
@@ -360,6 +377,7 @@ require_signatures = false            # set to true to enforce signed writes
 nexus-link config show                                    # display full config
 nexus-link config set compose.dir /opt/my-stack          # change compose root
 nexus-link config set compose.require_signatures true     # enable Ed25519
+nexus-link config set compose.writable false              # compose read-only
 nexus-link config get node.node_id                        # read a single value
 nexus-link config path                                    # show config file path
 ```

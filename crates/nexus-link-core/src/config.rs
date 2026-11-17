@@ -297,6 +297,7 @@ pub fn dirs_home() -> PathBuf {
 /// extra_extensions   = [".env", ".conf", ".toml"]
 /// signing_public_key = "..."
 /// require_signatures = false
+/// writable           = true
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -459,7 +460,21 @@ pub struct ComposeConfig {
     /// Enforce Ed25519 signatures on write operations (default: false).
     #[serde(default)]
     pub require_signatures: bool,
+
+    /// Whether this node may change the compose stack (default: true).
+    /// With `false`, `put_file` and `activate` are rejected on the queue and
+    /// on the HTTP path, the service unit gets no write access to `dir`, and
+    /// the heartbeat reports `compose_writable: false`. Use it for a profile
+    /// that shares the compose stack of another profile (e.g. a staging
+    /// profile next to production on the same host). Reads keep working.
+    #[serde(default = "default_true")]
+    pub writable: bool,
 }
+
+/// Error for a compose write on a node with `compose.writable = false`.
+/// Reported to the hub as the command error.
+pub const COMPOSE_READ_ONLY_ERROR: &str =
+    "compose: read-only (compose.writable = false on this node)";
 
 impl Default for ComposeConfig {
     fn default() -> Self {
@@ -469,6 +484,7 @@ impl Default for ComposeConfig {
             cmd_token: None,
             signing_public_key: None,
             require_signatures: false,
+            writable: true,
         }
     }
 }
@@ -616,6 +632,10 @@ fn default_listen_addr() -> String {
 
 fn default_listen_port() -> u16 {
     8443
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_compose_dir() -> PathBuf {

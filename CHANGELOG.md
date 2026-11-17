@@ -24,6 +24,15 @@ this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
   the RFC 8032 test key and runs every vector through
   `verify_queued_command`; a different `node_id` must fail.
 
+- **Read-only compose mode** (`compose.writable`, default `true`). With
+  `false`, `put_file` and `activate` are rejected on the queue (`failed`,
+  `compose: read-only ...`, checked after the signature) and on the HTTP
+  path (`403`); reads keep working. The service unit then gets no
+  `ReadWritePaths` for the compose dir, and the heartbeat reports the
+  optional field `compose_writable`. Meant for a staging profile that
+  shares the production compose stack (Dispatch 19198f56). Also in
+  `config show/get/set`.
+
 ### Fixed
 
 - **One unknown command type no longer blocks the whole queue.** The

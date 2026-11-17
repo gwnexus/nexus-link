@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ed25519_dalek::VerifyingKey;
+use nexus_link_core::config::COMPOSE_READ_ONLY_ERROR;
 use nexus_link_core::signing::{NonceCache, VerifyContext, verify_queued_command};
 use nexus_link_core::types::{
     ComposeCommandItem, ComposeCommandResult, ComposeCommandStatus, ComposeCommandType,
@@ -57,6 +58,8 @@ pub struct CommandContext<'a> {
     pub require_signatures: bool,
     pub signing_key: Option<&'a VerifyingKey>,
     pub nonces: &'a NonceCache,
+    /// `compose.writable`; `false` rejects `put_file` and `activate`.
+    pub compose_writable: bool,
 }
 
 impl<'a> CommandContext<'a> {
@@ -68,6 +71,7 @@ impl<'a> CommandContext<'a> {
             require_signatures: state.config.compose.require_signatures,
             signing_key: state.signing_pubkey.as_ref(),
             nonces: &state.nonces,
+            compose_writable: state.config.compose.writable,
         }
     }
 }
@@ -244,6 +248,16 @@ pub async fn handle_command(
         debug!(id = %cmd.id, "Executing unsigned command (signature enforcement is off)");
     }
     debug!(id = %cmd.id, type_ = cmd.command_type.as_str(), signed = verified.signed, "Executing command");
+
+    // Checked after verification, so a forged write still reports `signature:`.
+    let is_write = matches!(
+        cmd.command_type,
+        ComposeCommandType::PutFile | ComposeCommandType::Activate
+    );
+    if is_write && !ctx.compose_writable {
+        warn!(id = %cmd.id, type_ = cmd.command_type.as_str(), "Rejected compose write on a read-only node");
+        return failed(COMPOSE_READ_ONLY_ERROR.to_string());
+    }
 
     let args = &verified.args;
     match &cmd.command_type {
@@ -626,6 +640,7 @@ mod tests {
             require_signatures: require,
             signing_key: vk,
             nonces,
+            compose_writable: true,
         }
     }
 
@@ -748,6 +763,52 @@ mod tests {
         let result = handle_command(&cmd, &ctx(dir.path(), true, Some(&vk), &nonces)).await;
         assert_eq!(result.status, ComposeCommandStatus::Completed);
         assert_eq!(result.result.unwrap()["valid"], false);
+    }
+
+    #[tokio::test]
+    async fn read_only_node_rejects_writes_but_serves_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("docker-compose.yaml"), "services: {}\n").unwrap();
+        let vk = key().verifying_key();
+        let nonces = NonceCache::new();
+        let mut ro = ctx(dir.path(), true, Some(&vk), &nonces);
+        ro.compose_writable = false;
+
+        let put = signed(ComposeCommandType::PutFile, r#"{"content":"a: 1"}"#, "n1");
+        let result = handle_command(&put, &ro).await;
+        assert_eq!(result.status, ComposeCommandStatus::Failed);
+        assert_eq!(result.error.as_deref(), Some(COMPOSE_READ_ONLY_ERROR));
+        let content = std::fs::read_to_string(dir.path().join("docker-compose.yaml")).unwrap();
+        assert_eq!(content, "services: {}\n", "file must stay unchanged");
+
+        let activate = signed(ComposeCommandType::Activate, "{}", "n2");
+        let result = handle_command(&activate, &ro).await;
+        assert_eq!(result.error.as_deref(), Some(COMPOSE_READ_ONLY_ERROR));
+
+        let get = signed(ComposeCommandType::GetFile, "{}", "n3");
+        let result = handle_command(&get, &ro).await;
+        assert_eq!(result.status, ComposeCommandStatus::Completed);
+
+        let validate = signed(
+            ComposeCommandType::ValidateYaml,
+            r#"{"content":"a: 1"}"#,
+            "n4",
+        );
+        let result = handle_command(&validate, &ro).await;
+        assert_eq!(result.status, ComposeCommandStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn read_only_node_reports_forged_write_as_signature_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let vk = key().verifying_key();
+        let nonces = NonceCache::new();
+        let mut ro = ctx(dir.path(), true, Some(&vk), &nonces);
+        ro.compose_writable = false;
+        let mut put = signed(ComposeCommandType::PutFile, r#"{"content":"a: 1"}"#, "n1");
+        put.payload = Some(r#"{"content":"evil: 1"}"#.into());
+        let result = handle_command(&put, &ro).await;
+        assert_eq!(result.error.as_deref(), Some("signature: invalid"));
     }
 
     #[tokio::test]

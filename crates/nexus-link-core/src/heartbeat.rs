@@ -18,7 +18,9 @@
 //!
 //! Since 0.21.2 the heartbeat also reports `command_signatures`
 //! (`enforced`, `off` or `key_missing`), so the hub can gate runtime
-//! mutation on signature enforcement (see `crate::signing`).
+//! mutation on signature enforcement (see `crate::signing`). It also reports
+//! `compose_writable` (`compose.writable`): `false` means the node rejects
+//! compose writes, whatever the signature state.
 
 use std::collections::{HashMap, HashSet};
 
@@ -110,6 +112,11 @@ pub struct HeartbeatPayload {
     /// Command signature enforcement on this node.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command_signatures: Option<SignatureState>,
+    /// Whether the node may change its compose stack (`compose.writable`).
+    /// The hub should offer `put_file`, `activate` and promotion only when
+    /// this is not `false` (and signatures are enforced).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compose_writable: Option<bool>,
 }
 
 impl HeartbeatPayload {
@@ -119,12 +126,19 @@ impl HeartbeatPayload {
             status: "online".to_string(),
             models,
             command_signatures: None,
+            compose_writable: None,
         }
     }
 
     /// Add the command signature enforcement state.
     pub fn with_command_signatures(mut self, state: SignatureState) -> Self {
         self.command_signatures = Some(state);
+        self
+    }
+
+    /// Add whether the node may change its compose stack.
+    pub fn with_compose_writable(mut self, writable: bool) -> Self {
+        self.compose_writable = Some(writable);
         self
     }
 }

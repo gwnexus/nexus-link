@@ -17,6 +17,18 @@ fn test_payload_without_models_omits_field() {
 }
 
 #[test]
+fn test_payload_reports_compose_writable_only_when_set() {
+    let body = serde_json::to_value(HeartbeatPayload::online(None)).unwrap();
+    assert!(body.get("compose_writable").is_none());
+    let body =
+        serde_json::to_value(HeartbeatPayload::online(None).with_compose_writable(false)).unwrap();
+    assert_eq!(
+        body,
+        json!({ "status": "online", "compose_writable": false })
+    );
+}
+
+#[test]
 fn test_payload_with_empty_models_sends_empty_list() {
     // Runtime reachable but serves nothing: explicit empty list.
     let body = serde_json::to_value(HeartbeatPayload::online(Some(vec![]))).unwrap();
