@@ -13,6 +13,14 @@ it is built against (ADR-0006): nexus-link `0.21.x` targets Nexus Hub `0.21.x`.
 this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
 0.11.0 used independent numbering.
 
+## [Unreleased]
+
+### Security
+
+- HTTP command path: the nonce is recorded only after the Ed25519 signature
+  verified, as on the command queue (ADR-0007). Before, a request with a
+  forged signature could burn a nonce for the genuine one.
+
 ## [0.21.2] - 2026-11-17
 
 Signed command queue, step 1 of 2 (Dispatch 747d083f from the hub). Safe with

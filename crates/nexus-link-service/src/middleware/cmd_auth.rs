@@ -148,17 +148,6 @@ pub async fn require_cmd_auth(
                     }
                 }
 
-                // Nonce replay prevention (SEC-005): reject duplicate nonces
-                // within the window. The cache is shared with the command queue.
-                if !state.nonces.check_and_insert(&nonce_str, Utc::now()) {
-                    warn!(nonce = %nonce_str, "C&C auth: duplicate nonce (replay attempt)");
-                    return Err((
-                        StatusCode::FORBIDDEN,
-                        axum::Json(json!({ "error": "Duplicate nonce — possible replay" })),
-                    )
-                        .into_response());
-                }
-
                 // Buffer the body to compute its hash, then put it back
                 let path = req.uri().path().to_owned();
                 let (parts, body) = req.into_parts();
@@ -208,6 +197,19 @@ pub async fn require_cmd_auth(
                     return Err((
                         StatusCode::FORBIDDEN,
                         axum::Json(json!({ "error": "Invalid request signature" })),
+                    )
+                        .into_response());
+                }
+
+                // Nonce replay prevention (SEC-005, ADR-0007): reject duplicate
+                // nonces within the window. Recorded only after the signature
+                // verified, so forged requests cannot burn nonces. The cache is
+                // shared with the command queue.
+                if !state.nonces.check_and_insert(&nonce_str, Utc::now()) {
+                    warn!(nonce = %nonce_str, "C&C auth: duplicate nonce (replay attempt)");
+                    return Err((
+                        StatusCode::FORBIDDEN,
+                        axum::Json(json!({ "error": "Duplicate nonce, possible replay" })),
                     )
                         .into_response());
                 }
