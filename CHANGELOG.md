@@ -21,6 +21,23 @@ this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
   verified, as on the command queue (ADR-0007). Before, a request with a
   forged signature could burn a nonce for the genuine one.
 
+### Fixed
+
+- **Queued `get_logs_snapshot` failed on hardened hosts** with
+  `open <compose dir>/.env: permission denied` (Dispatch 82170dd4).
+  `docker compose logs` loads the whole project, including `.env` for
+  interpolation, which the service user cannot read. The snapshot now finds
+  the stack's containers by the compose label
+  `com.docker.compose.project.working_dir` and reads them with `docker logs`;
+  nothing in the compose directory is opened. Lines are merged across
+  containers in timestamp order (`<service> | <timestamp> <line>`), the newest
+  500 are kept, and the result gains a `containers` count.
+- **Failed log snapshots were reported as `completed`** with the error as a
+  log line. A failing docker call now finishes the command as `failed` with
+  the message in `error`.
+- Command output truncation could panic on multi-byte UTF-8 at the cut
+  position; it now cuts at a character boundary.
+
 ## [0.21.2] - 2026-11-17
 
 Signed command queue, step 1 of 2 (Dispatch 747d083f from the hub). Safe with

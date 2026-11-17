@@ -9,6 +9,7 @@ use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
+mod compose_logs;
 mod handlers;
 mod middleware;
 mod pg_listener;

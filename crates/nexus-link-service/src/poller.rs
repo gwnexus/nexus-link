@@ -27,6 +27,7 @@ use tokio::process::Command;
 use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
 
+use crate::compose_logs;
 use crate::state::AppState;
 
 /// Maximum output length returned to the backend (SEC-008).
@@ -37,9 +38,11 @@ fn truncate_output(s: &str) -> String {
     if s.len() <= MAX_OUTPUT_LEN {
         s.to_string()
     } else {
+        // Cut at a char boundary; slicing at a fixed byte index panics on
+        // multi-byte UTF-8 (e.g. progress bars in docker output).
         format!(
             "{}... [truncated, {} bytes total]",
-            &s[..MAX_OUTPUT_LEN],
+            &s[..s.floor_char_boundary(MAX_OUTPUT_LEN)],
             s.len()
         )
     }
@@ -353,6 +356,8 @@ async fn execute_activate(compose_dir: &Path) -> ComposeCommandResult {
 
 // ── GetLogsSnapshot ─────────────────────────────────────────────────────────
 
+/// Log snapshot through `docker logs` per container of the stack, so
+/// `.env` and the compose file are never read (see `compose_logs`).
 async fn execute_logs_snapshot(
     args: &serde_json::Value,
     compose_dir: &Path,
@@ -361,26 +366,12 @@ async fn execute_logs_snapshot(
         .get("tail")
         .and_then(|v| v.as_u64())
         .unwrap_or(100)
-        .to_string();
+        .min(10_000);
     let service = args.get("service").and_then(|v| v.as_str());
 
-    let mut args = vec![
-        "compose".to_string(),
-        "logs".to_string(),
-        "--no-color".to_string(),
-        "--tail".to_string(),
-        tail,
-    ];
-    // When no specific service is given, --tail N applies per-container
-    // which can result in N * num_containers lines and slow execution.
-    // Add --since to limit the time range and speed up the query.
-    if service.is_none() {
-        args.push("--since".to_string());
-        args.push("5m".to_string());
-    }
     if let Some(svc) = service {
-        // SEC-003: Validate service name — reject flag-like values and special chars
-        // to prevent argument injection into docker compose logs.
+        // SEC-003: only plain service names; the value is compared against
+        // container labels and never passed to docker as an argument.
         let valid = !svc.is_empty()
             && !svc.starts_with('-')
             && svc
@@ -393,46 +384,35 @@ async fn execute_logs_snapshot(
                 error: Some(format!("Invalid service name: '{}'", svc)),
             };
         }
-        args.push(svc.to_string());
     }
 
-    let run = timeout(
-        Duration::from_secs(15),
-        Command::new("docker")
-            .args(&args)
-            .current_dir(compose_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output(),
-    )
-    .await;
+    let req = compose_logs::SnapshotRequest {
+        compose_dir,
+        service,
+        tail,
+        // Without a service, --tail applies per container; limit the range
+        // so the snapshot stays small and fast.
+        since: service.is_none().then_some("5m"),
+        timeout: Duration::from_secs(15),
+    };
 
-    match run {
-        Err(_) => ComposeCommandResult {
-            status: ComposeCommandStatus::Failed,
-            result: None,
-            error: Some("Timeout collecting log snapshot".to_string()),
+    match compose_logs::snapshot(&req).await {
+        Ok(snap) => ComposeCommandResult {
+            status: ComposeCommandStatus::Completed,
+            result: Some(serde_json::json!({
+                "service": service,
+                "lines": snap.lines,
+                "truncated": snap.truncated,
+                "containers": snap.containers,
+            })),
+            error: None,
         },
-        Ok(Err(e)) => ComposeCommandResult {
-            status: ComposeCommandStatus::Failed,
-            result: None,
-            error: Some(format!("Failed to run docker compose logs: {}", e)),
-        },
-        Ok(Ok(output)) => {
-            let combined = String::from_utf8_lossy(&output.stdout).to_string()
-                + &String::from_utf8_lossy(&output.stderr);
-            // Cap output to prevent oversized payloads and slow transfers
-            const MAX_LINES: usize = 500;
-            let lines: Vec<&str> = combined.lines().take(MAX_LINES).collect();
-            let truncated = combined.lines().count() > MAX_LINES;
+        Err(e) => {
+            warn!(error = %e, "Log snapshot failed");
             ComposeCommandResult {
-                status: ComposeCommandStatus::Completed,
-                result: Some(serde_json::json!({
-                    "service": service,
-                    "lines": lines,
-                    "truncated": truncated,
-                })),
-                error: None,
+                status: ComposeCommandStatus::Failed,
+                result: None,
+                error: Some(e),
             }
         }
     }
