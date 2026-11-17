@@ -15,6 +15,15 @@ this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
 
 ## [Unreleased]
 
+### Added
+
+- **Hub signing test vectors in CI** (ADR-0007). The hub's
+  `nexus-cmd-v1` vectors are vendored unchanged from hub commit `d5228b4b`
+  (`tests/fixtures/hub/`). `hub_vectors_tests` rebuilds every message with
+  `queue_message`, compares the payload hash, verifies the signature with
+  the RFC 8032 test key and runs vectors with node command types through
+  `verify_queued_command`; a different `node_id` must fail.
+
 ### Fixed
 
 - **Release image builds use the Blacksmith builder again.**

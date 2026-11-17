@@ -10,6 +10,8 @@ mod error_tests;
 #[cfg(test)]
 mod heartbeat_tests;
 #[cfg(test)]
+mod hub_vectors_tests;
+#[cfg(test)]
 mod preflight_tests;
 #[cfg(test)]
 mod setup_tests;

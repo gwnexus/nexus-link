@@ -1,0 +1,52 @@
+{
+  "contract": "nexus-cmd-v1",
+  "version": 1,
+  "test_key": {
+    "note": "RFC 8032 section 7.1 TEST 1 key pair (public test vector, never used in any environment); signatures are deterministic Ed25519 over `message` as UTF-8",
+    "public_key_hex": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+  },
+  "vectors": [
+    {
+      "name": "logs snapshot with args",
+      "input": {
+        "nodeId": "6f1c2a0e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+        "commandId": "0d9c8b7a-6f5e-4d3c-9b2a-1f0e9d8c7b6a",
+        "type": "get_logs_snapshot",
+        "timestamp": "2026-11-17T12:00:00Z",
+        "nonce": "2b1c4f7e-8a3d-4c6b-9e0f-5a7d3c1b2e4f",
+        "payload": "{\"service\":\"vllm\",\"tail\":200}"
+      },
+      "payload_sha256": "1e11ac959cbbd3b414298e0ac8f2b9e1e2717f0de883ec0d414e32e558aa0ac9",
+      "message": "nexus-cmd-v1\n6f1c2a0e-3b4d-4e5f-8a9b-0c1d2e3f4a5b\n0d9c8b7a-6f5e-4d3c-9b2a-1f0e9d8c7b6a\nget_logs_snapshot\n2026-11-17T12:00:00Z\n2b1c4f7e-8a3d-4c6b-9e0f-5a7d3c1b2e4f\n1e11ac959cbbd3b414298e0ac8f2b9e1e2717f0de883ec0d414e32e558aa0ac9",
+      "signature": "a1bfea8e02a061866158ee5e5f296898c72f9e20cefe491fcc6cdb0acfe38b2942afe4d880c0e0819e9268f86e074c9519f58ca22351c56de7c23fd179d9b004"
+    },
+    {
+      "name": "no args",
+      "input": {
+        "nodeId": "6f1c2a0e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+        "commandId": "1e2d3c4b-5a69-4788-9a0b-c1d2e3f4a5b6",
+        "type": "compose_ps",
+        "timestamp": "2026-11-17T12:00:05Z",
+        "nonce": "7c6b5a49-3827-4615-9d0e-f1a2b3c4d5e6",
+        "payload": "{}"
+      },
+      "payload_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "message": "nexus-cmd-v1\n6f1c2a0e-3b4d-4e5f-8a9b-0c1d2e3f4a5b\n1e2d3c4b-5a69-4788-9a0b-c1d2e3f4a5b6\ncompose_ps\n2026-11-17T12:00:05Z\n7c6b5a49-3827-4615-9d0e-f1a2b3c4d5e6\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "signature": "87d43ef4992c828d40a2ce951e27e7b246c2871db1d7f0d555c187f6ba141459ae404d8c6c26b37a879f0547a9cbbb894c80080e1773c9a5fc4dcd222a20f900"
+    },
+    {
+      "name": "non-ASCII payload",
+      "input": {
+        "nodeId": "6f1c2a0e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+        "commandId": "2f3e4d5c-6b7a-4899-8a1b-2c3d4e5f6a7b",
+        "type": "read_file",
+        "timestamp": "2026-11-17T12:00:10Z",
+        "nonce": "8d7c6b5a-4938-4726-8e1f-a2b3c4d5e6f7",
+        "payload": "{\"path\":\"/opt/nexus/größe.txt\"}"
+      },
+      "payload_sha256": "ffa96f9748886a69d4d0bec7bab1982d6c8e827194b6f3d81f6e9877755b1871",
+      "message": "nexus-cmd-v1\n6f1c2a0e-3b4d-4e5f-8a9b-0c1d2e3f4a5b\n2f3e4d5c-6b7a-4899-8a1b-2c3d4e5f6a7b\nread_file\n2026-11-17T12:00:10Z\n8d7c6b5a-4938-4726-8e1f-a2b3c4d5e6f7\nffa96f9748886a69d4d0bec7bab1982d6c8e827194b6f3d81f6e9877755b1871",
+      "signature": "e4eda0d64c4d0500c70a63b8b32c54e8e2f53b84ea7d8677d72116df93db7c41c30f03dfd98fe11656772129ba661e5d6247aa80bd5f752e40ac76a35ed04a08"
+    }
+  ]
+}
