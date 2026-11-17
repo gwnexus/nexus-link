@@ -224,7 +224,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Blacksmith Builder
-        uses: useblacksmith/setup-docker-builder@8fbda8108100092be0ef3320da0a93fbb8f47d7f # v1.14.0
+        uses: useblacksmith/setup-docker-builder@06dd9c83a5d541274d2e3ac67625560979275267 # v2.3.0
 
       - name: Build${{ inputs.publish && ' and push' || '' }} (${{ matrix.docker_platform }})
         uses: useblacksmith/build-push-action@9b0579bbec7a6cad2f171596c57e7ac1e7658850 # v2.3.0
@@ -260,7 +260,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Blacksmith Builder
-        uses: useblacksmith/setup-docker-builder@8fbda8108100092be0ef3320da0a93fbb8f47d7f # v1.14.0
+        uses: useblacksmith/setup-docker-builder@06dd9c83a5d541274d2e3ac67625560979275267 # v2.3.0
 
       - name: Create and push multi-arch manifest
         env:
