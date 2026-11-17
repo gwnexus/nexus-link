@@ -15,7 +15,18 @@ this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
 
 ## [Unreleased]
 
+### Fixed
+
+- Agent container stats could panic on a container without an id
+  (`&id[..12]` slice in the stats error path).
+
 ### Changed
+
+- **Dependencies:** bollard 0.18 to 0.21 (agent container stats migrated to
+  `bollard::query_parameters` and `ContainerStatsResponse`, whose fields are
+  now all optional; missing values count as 0), tower-http 0.7, toml 1.2,
+  base64 0.23, tokio-postgres-rustls 0.14, plus the minor/patch group and
+  `useblacksmith/setup-docker-builder` 2.3.0 (Dependabot #3 to #9).
 
 - **Docker builders pinned to the toolchain version.** `Dockerfile.service`
   and `Dockerfile.native` built with `rust:latest`; they now use

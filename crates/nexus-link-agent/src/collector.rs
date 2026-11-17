@@ -1,5 +1,6 @@
 use bollard::Docker;
-use bollard::container::StatsOptions;
+use bollard::models::ContainerStatsResponse;
+use bollard::query_parameters::{ListContainersOptions, StatsOptions};
 use chrono::Utc;
 use futures::StreamExt;
 use nexus_link_core::config::Config;
@@ -64,7 +65,7 @@ async fn collect_container_metrics() -> anyhow::Result<Vec<ContainerMetrics>> {
     };
 
     let containers = docker
-        .list_containers(Some(bollard::container::ListContainersOptions::<String> {
+        .list_containers(Some(ListContainersOptions {
             all: false, // only running containers
             ..Default::default()
         }))
@@ -130,7 +131,8 @@ async fn get_container_stats(docker: &Docker, container_id: &str) -> ContainerSt
     let stats = match stream.next().await {
         Some(Ok(s)) => s,
         Some(Err(e)) => {
-            debug!("Stats error for {}: {}", &container_id[..12], e);
+            let short_id: String = container_id.chars().take(12).collect();
+            debug!("Stats error for {}: {}", short_id, e);
             return default;
         }
         None => return default,
@@ -140,18 +142,12 @@ async fn get_container_stats(docker: &Docker, container_id: &str) -> ContainerSt
     let cpu_percent = calculate_cpu_percent(&stats);
 
     // Memory
-    let memory_usage = stats.memory_stats.usage.unwrap_or(0);
-    let memory_limit = stats.memory_stats.limit.unwrap_or(0);
+    let memory = stats.memory_stats.as_ref();
+    let memory_usage = memory.and_then(|m| m.usage).unwrap_or(0);
+    let memory_limit = memory.and_then(|m| m.limit).unwrap_or(0);
 
     // Network (sum all interfaces)
-    let (network_rx, network_tx) = stats
-        .networks
-        .map(|nets| {
-            nets.values().fold((0u64, 0u64), |(rx, tx), net| {
-                (rx + net.rx_bytes, tx + net.tx_bytes)
-            })
-        })
-        .unwrap_or((0, 0));
+    let (network_rx, network_tx) = network_totals(&stats);
 
     ContainerStats {
         cpu_percent,
@@ -163,19 +159,43 @@ async fn get_container_stats(docker: &Docker, container_id: &str) -> ContainerSt
 }
 
 /// Calculate CPU usage percentage from Docker stats
-fn calculate_cpu_percent(stats: &bollard::container::Stats) -> f64 {
-    let cpu_delta = stats.cpu_stats.cpu_usage.total_usage as f64
-        - stats.precpu_stats.cpu_usage.total_usage as f64;
+fn calculate_cpu_percent(stats: &ContainerStatsResponse) -> f64 {
+    let total = |cpu: Option<&bollard::models::ContainerCpuStats>| {
+        cpu.and_then(|c| c.cpu_usage.as_ref())
+            .and_then(|u| u.total_usage)
+            .unwrap_or(0) as f64
+    };
+    let system = |cpu: Option<&bollard::models::ContainerCpuStats>| {
+        cpu.and_then(|c| c.system_cpu_usage).unwrap_or(0) as f64
+    };
+    let cpu = stats.cpu_stats.as_ref();
+    let precpu = stats.precpu_stats.as_ref();
 
-    let system_delta = stats.cpu_stats.system_cpu_usage.unwrap_or(0) as f64
-        - stats.precpu_stats.system_cpu_usage.unwrap_or(0) as f64;
+    let cpu_delta = total(cpu) - total(precpu);
+    let system_delta = system(cpu) - system(precpu);
 
     if system_delta > 0.0 && cpu_delta > 0.0 {
-        let num_cpus = stats.cpu_stats.online_cpus.unwrap_or(1) as f64;
+        let num_cpus = cpu.and_then(|c| c.online_cpus).unwrap_or(1) as f64;
         (cpu_delta / system_delta) * num_cpus * 100.0
     } else {
         0.0
     }
+}
+
+/// Received and transmitted bytes summed over all interfaces.
+fn network_totals(stats: &ContainerStatsResponse) -> (u64, u64) {
+    stats
+        .networks
+        .as_ref()
+        .map(|nets| {
+            nets.values().fold((0u64, 0u64), |(rx, tx), net| {
+                (
+                    rx.saturating_add(net.rx_bytes.unwrap_or(0)),
+                    tx.saturating_add(net.tx_bytes.unwrap_or(0)),
+                )
+            })
+        })
+        .unwrap_or((0, 0))
 }
 
 /// Collect GPU metrics by parsing nvidia-smi output
@@ -380,5 +400,44 @@ mod tests {
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].memory_total_bytes, 128 * 1024 * 1024 * 1024); // 128 GB
         assert_eq!(devices[0].power_draw_watts, 125.5);
+    }
+
+    fn stats_json(v: serde_json::Value) -> ContainerStatsResponse {
+        serde_json::from_value(v).expect("stats json")
+    }
+
+    #[test]
+    fn cpu_percent_from_docker_stats() {
+        let stats = stats_json(serde_json::json!({
+            "cpu_stats": { "cpu_usage": { "total_usage": 300 }, "system_cpu_usage": 2000, "online_cpus": 4 },
+            "precpu_stats": { "cpu_usage": { "total_usage": 100 }, "system_cpu_usage": 1000 }
+        }));
+        // (200 / 1000) * 4 cpus * 100
+        assert!((calculate_cpu_percent(&stats) - 80.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cpu_percent_is_zero_when_fields_are_missing() {
+        assert_eq!(
+            calculate_cpu_percent(&stats_json(serde_json::json!({}))),
+            0.0
+        );
+        // One-shot stats on some engines omit precpu; must not divide by zero
+        let stats = stats_json(serde_json::json!({
+            "cpu_stats": { "cpu_usage": { "total_usage": 300 } }
+        }));
+        assert_eq!(calculate_cpu_percent(&stats), 0.0);
+    }
+
+    #[test]
+    fn network_totals_sum_interfaces_and_tolerate_missing_fields() {
+        let stats = stats_json(serde_json::json!({
+            "networks": {
+                "eth0": { "rx_bytes": 10, "tx_bytes": 20 },
+                "eth1": { "rx_bytes": 5 }
+            }
+        }));
+        assert_eq!(network_totals(&stats), (15, 20));
+        assert_eq!(network_totals(&stats_json(serde_json::json!({}))), (0, 0));
     }
 }

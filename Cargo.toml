@@ -35,7 +35,7 @@ toml = "1.2"
 clap = { version = "4", features = ["derive", "env"] }
 
 # Docker
-bollard = "0.18"
+bollard = "0.21"
 
 # System info
 sysinfo = "0.33"
