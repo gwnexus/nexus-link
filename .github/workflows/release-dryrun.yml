@@ -1,0 +1,77 @@
+name: Release Dry Run
+
+# Runs the real release build (release-build.yml) without publishing:
+# no image push, no GitHub Release, no tag. Triggered on changes that can
+# break a release, manually, or via scripts/ci/release-dryrun.sh.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release*.yml'
+      - 'docker/**'
+      - 'rust-toolchain.toml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'CHANGELOG.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/release*.yml'
+      - 'docker/**'
+      - 'rust-toolchain.toml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'CHANGELOG.md'
+
+permissions: {}
+
+concurrency:
+  group: release-dryrun-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Version from Cargo.toml; must not be lower than the latest release tag.
+  # ---------------------------------------------------------------------------
+  meta:
+    name: Version from Cargo.toml
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Read and compare version
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/ s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          latest=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          latest=${latest#v}
+          echo "Cargo.toml version: $version, latest tag: ${latest:-none}"
+          if [ -n "$latest" ]; then
+            lowest=$(printf '%s\n%s\n' "$version" "$latest" | sort -V | head -n1)
+            if [ "$lowest" != "$latest" ]; then
+              echo "::error::Cargo.toml version $version is lower than the latest tag v$latest"
+              exit 1
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build
+    needs: [meta]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-build.yml
+    with:
+      version: ${{ needs.meta.outputs.version }}
+      publish: false
+      changelog-allow-unreleased: true

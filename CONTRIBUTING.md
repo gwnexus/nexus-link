@@ -10,7 +10,7 @@ Thank you for your interest in contributing to Nexus Link.
 
 ## Requirements
 
-- Rust >= 1.85 (2024 edition, install via [rustup](https://rustup.rs))
+- [rustup](https://rustup.rs); the exact Rust version is pinned in `rust-toolchain.toml` and installed automatically (`rustup toolchain install`)
 - Docker (for container-related testing)
 - `cargo fmt` and `cargo clippy` must pass without warnings
 
@@ -31,7 +31,15 @@ cargo clippy --workspace -- -D warnings
 
 # Full pre-commit check
 make check
+
+# Release pipeline without publishing (needs gh, branch must be pushed)
+scripts/ci/release-dryrun.sh
 ```
+
+Changes to `.github/workflows/release*.yml`, `docker/`, `rust-toolchain.toml`
+or `Cargo.toml` trigger the release dry run automatically on push to `main`.
+GitHub Actions are pinned to commit SHAs with the version as a comment;
+Dependabot keeps them current.
 
 ## Project Structure
 

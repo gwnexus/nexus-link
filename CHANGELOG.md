@@ -13,6 +13,38 @@ it is built against (ADR-0006): nexus-link `0.21.x` targets Nexus Hub `0.21.x`.
 this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
 0.11.0 used independent numbering.
 
+## [Unreleased]
+
+### Added
+
+- **Release dry run.** `release-dryrun.yml` runs the real release build
+  without publishing (no image push, no GitHub Release, no tag), on changes
+  to release workflows, `docker/`, `rust-toolchain.toml`, `Cargo.toml`,
+  `Cargo.lock` or `CHANGELOG.md`, and on demand via
+  `scripts/ci/release-dryrun.sh`.
+- **Release checks.** Tag must equal the `Cargo.toml` version and have a
+  CHANGELOG section; tarballs are checked for all three binaries and the CLI
+  `--version`.
+- **Dependabot** for GitHub Actions, Cargo and the Rust toolchain (weekly,
+  grouped).
+- actionlint and zizmor configuration in `.github/`.
+
+### Changed
+
+- **Rust toolchain pinned** to 1.100.0 in `rust-toolchain.toml`; CI, release
+  and local builds use exactly this version (replaces
+  `dtolnay/rust-toolchain@stable`).
+- **CI hardening:** all actions pinned to commit SHAs and moved to their
+  Node.js 24 releases (checkout v7, upload-artifact v7, download-artifact v8,
+  docker/login-action v4, rust-cache v2.9.3, Blacksmith actions);
+  least-privilege `permissions:` in every workflow; `persist-credentials:
+  false` on checkouts; `cross` pinned to a commit; workflow inputs passed via
+  `env` instead of inline expressions.
+- Release build logic moved into the reusable `release-build.yml`, shared by
+  release and dry run. `useblacksmith/cache` (still Node.js 20) replaced by
+  `Swatinem/rust-cache`; `softprops/action-gh-release` replaced by
+  `gh release create`.
+
 ## [0.21.1] - 2026-11-17
 
 ### Added

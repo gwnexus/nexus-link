@@ -1,0 +1,277 @@
+name: Release Build # zizmor: ignore[excessive-permissions] container jobs inherit the caller's token, see below
+
+# Reusable build pipeline shared by the real release (release.yml, publish:
+# true) and the release dry run (release-dryrun.yml, publish: false), so the
+# dry run exercises exactly the build logic that ships.
+#
+# Permissions: jobs that only read declare `contents: read`. The container
+# jobs inherit the caller's token on purpose: release.yml grants
+# `packages: write` for the push, the dry run grants read-only access, and
+# a called workflow can never raise what the caller grants.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version to build, without the leading "v" (e.g. 0.21.1)
+        required: true
+        type: string
+      publish:
+        description: Push images to GHCR (release) or build only (dry run)
+        required: true
+        type: boolean
+      changelog-allow-unreleased:
+        description: Accept an "Unreleased" CHANGELOG section instead of the version section
+        required: false
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/nexus-link-service
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Version consistency: the requested version must equal the workspace
+  # version in Cargo.toml and have a CHANGELOG section.
+  # ---------------------------------------------------------------------------
+  verify-version:
+    name: Verify version
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check Cargo.toml and CHANGELOG
+        env:
+          VERSION: ${{ inputs.version }}
+          ALLOW_UNRELEASED: ${{ inputs.changelog-allow-unreleased }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version '$VERSION' is not MAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          cargo_version=$(sed -n '/^\[workspace.package\]/,/^\[/ s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          if [ "$cargo_version" != "$VERSION" ]; then
+            echo "::error::Version '$VERSION' does not match Cargo.toml workspace version '$cargo_version'"
+            exit 1
+          fi
+          if grep -q "^## \[$VERSION\]" CHANGELOG.md; then
+            echo "CHANGELOG has a section for $VERSION"
+          elif [ "$ALLOW_UNRELEASED" = "true" ] && grep -q '^## \[Unreleased\]' CHANGELOG.md; then
+            echo "CHANGELOG has an Unreleased section (dry run)"
+          else
+            echo "::error::CHANGELOG.md has no '## [$VERSION]' section"
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Cross-compiled binaries for each target platform.
+  # ---------------------------------------------------------------------------
+  build-binaries:
+    name: Build (${{ matrix.target }})
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: [verify-version]
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+            artifact: nexus-link-aarch64-linux
+          - target: x86_64-unknown-linux-gnu
+            artifact: nexus-link-x86_64-linux
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Installs the exact version pinned in rust-toolchain.toml.
+      - name: Install Rust toolchain
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+          rustc --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: ${{ matrix.target }}
+          cache-targets: "false"
+
+      # cross has had no release since v0.2.5 (2023); pinned to a main commit.
+      - name: Install cross
+        run: cargo install cross --locked --git https://github.com/cross-rs/cross --rev a9301e91f72bba3850460512685f6b16062015ff
+
+      - name: Build
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cross build --release --target "$TARGET"
+
+      - name: Package binaries
+        env:
+          TARGET: ${{ matrix.target }}
+          ARTIFACT: ${{ matrix.artifact }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for bin in nexus-link nexus-link-agent nexus-link-service; do
+            cp "target/$TARGET/release/$bin" dist/
+          done
+          tar -czf "$ARTIFACT.tar.gz" -C dist .
+
+      # Full tarball for the GitHub Release
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.tar.gz
+          retention-days: ${{ inputs.publish && 7 || 1 }}
+
+      # Service binary alone for the container build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nexus-link-service-${{ matrix.target }}
+          path: dist/nexus-link-service
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # Check the packaged tarballs: all three binaries present, and the native
+  # x86_64 CLI reports the expected version.
+  # ---------------------------------------------------------------------------
+  verify-artifacts:
+    name: Verify artifacts
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: [build-binaries]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: nexus-link-*-linux
+          merge-multiple: true
+
+      - name: Check tarball contents and version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          for arch in aarch64 x86_64; do
+            tarball="nexus-link-$arch-linux.tar.gz"
+            listing=$(tar -tzf "$tarball")
+            for bin in nexus-link nexus-link-agent nexus-link-service; do
+              if ! grep -qx "\./$bin" <<<"$listing"; then
+                echo "::error::$tarball is missing $bin"
+                exit 1
+              fi
+            done
+            echo "$tarball: all binaries present"
+          done
+          # Only the CLI has --version; agent and service start their daemon
+          # on any invocation, so they are checked for presence only.
+          mkdir -p x86_64
+          tar -xzf nexus-link-x86_64-linux.tar.gz -C x86_64
+          out=$(./x86_64/nexus-link --version)
+          echo "nexus-link --version: $out"
+          if [ "$out" != "nexus-link $VERSION" ]; then
+            echo "::error::nexus-link --version reports '$out', expected 'nexus-link $VERSION'"
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Platform images from the pre-built service binaries (no compilation).
+  # publish: true pushes `<version>-<arch>` tags; false only builds.
+  # ---------------------------------------------------------------------------
+  build-container: # zizmor: ignore[excessive-permissions] inherits caller token: packages: write (release) or read-only (dry run)
+    name: Container Image (${{ matrix.docker_platform }})
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: [build-binaries]
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+            docker_platform: linux/arm64
+            tag_suffix: arm64
+          - target: x86_64-unknown-linux-gnu
+            docker_platform: linux/amd64
+            tag_suffix: amd64
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nexus-link-service-${{ matrix.target }}
+          path: dist/
+
+      - name: Mark binary executable
+        run: chmod +x dist/nexus-link-service
+
+      - name: Login to GHCR
+        if: inputs.publish
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@8fbda8108100092be0ef3320da0a93fbb8f47d7f # v1.14.0
+
+      - name: Build${{ inputs.publish && ' and push' || '' }} (${{ matrix.docker_platform }})
+        uses: useblacksmith/build-push-action@9b0579bbec7a6cad2f171596c57e7ac1e7658850 # v2.3.0
+        with:
+          context: .
+          file: docker/Dockerfile.release
+          platforms: ${{ matrix.docker_platform }}
+          push: ${{ inputs.publish }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.version }}-${{ matrix.tag_suffix }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ inputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+  # ---------------------------------------------------------------------------
+  # Multi-arch manifest from the two platform images (release only).
+  # 'docker buildx imagetools create' merges the manifest lists produced by
+  # build-push-action (unlike 'docker manifest').
+  # ---------------------------------------------------------------------------
+  publish-manifest: # zizmor: ignore[excessive-permissions] inherits caller token: packages: write (release only)
+    name: Publish Multi-Arch Manifest
+    if: inputs.publish
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: [build-container, verify-artifacts]
+
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@8fbda8108100092be0ef3320da0a93fbb8f47d7f # v1.14.0
+
+      - name: Create and push multi-arch manifest
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          MINOR=$(cut -d. -f1-2 <<<"$VERSION")
+          docker buildx imagetools create \
+            --tag "${IMAGE}:${VERSION}" \
+            --tag "${IMAGE}:${MINOR}" \
+            --tag "${IMAGE}:latest" \
+            "${IMAGE}:${VERSION}-arm64" \
+            "${IMAGE}:${VERSION}-amd64"

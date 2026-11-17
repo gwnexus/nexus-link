@@ -43,7 +43,8 @@ Falls back to `cargo install --git` if no binary exists for your platform.
 cargo install --git https://github.com/gwnexus/nexus-link.git nexus-link-cli
 ```
 
-Requires Rust >= 1.85 (2024 edition).
+Requires Rust >= 1.85 (2024 edition). Inside the repository, rustup uses the
+exact version pinned in `rust-toolchain.toml`.
 
 ### Pin a specific version
 
@@ -484,21 +485,39 @@ Registration includes an automatic preflight check:
 
 ## CI/CD
 
-- **CI** (`ci.yml`): Runs on every push/PR to `main`. Checks on
-  `ubuntu-latest` and `macos-latest`: `cargo fmt --check`, `cargo clippy -D warnings`,
-  `cargo nextest run`.
+All workflows pin actions to commit SHAs, run with least-privilege
+`permissions:`, and build with the Rust version pinned in
+`rust-toolchain.toml`. Dependabot (`.github/dependabot.yml`) bumps actions,
+Cargo dependencies and the toolchain weekly. actionlint and zizmor configs
+live in `.github/`.
 
-- **Release** (`release.yml`): Triggered by `v*` tags. Jobs run in order:
-  1. **Build binaries** (matrix: aarch64 + x86\_64) via `cross`, with Cargo
-     registry cache
-  2. **Container Image** (matrix: linux/arm64 + linux/amd64) — copies the
-     pre-built binary into `debian:bookworm-slim` via `Dockerfile.release`
-     (no compiler, no QEMU)
-  3. **Publish Multi-Arch Manifest** — assembles the two platform images into
-     a single manifest list via `docker buildx imagetools create`, tagged
-     `<version>`, `<major.minor>`, and `latest`
-  4. **GitHub Release** — attaches both tarballs; blocked until the manifest
-     is published
+- **CI** (`ci.yml`) and **Integration Tests** (`integration.yml`): every push
+  and PR to `main`, on Linux and macOS: `cargo fmt --check`,
+  `cargo clippy -D warnings`, tests and CLI/service scenarios.
+
+- **Release** (`release.yml`): triggered by `v*` tags. Builds through the
+  reusable `release-build.yml`, then attaches both tarballs to the GitHub
+  Release. `release-build.yml` runs in order:
+  1. **Verify version**: tag must equal the `Cargo.toml` workspace version, and
+     `CHANGELOG.md` must have a section for it
+  2. **Build binaries** (aarch64 + x86\_64) via `cross`
+  3. **Verify artifacts**: all three binaries in each tarball, CLI
+     `--version` matches
+  4. **Container Image** (linux/arm64 + linux/amd64): copies the pre-built
+     binary into `debian:bookworm-slim` via `Dockerfile.release` (no compiler,
+     no QEMU)
+  5. **Publish Multi-Arch Manifest**: tags `<version>`, `<major.minor>` and
+     `latest` via `docker buildx imagetools create`
+
+- **Release Dry Run** (`release-dryrun.yml`): the same `release-build.yml`
+  without publishing (no image push, no GitHub Release, no tag). Runs on
+  changes to release workflows, `docker/`, `rust-toolchain.toml`,
+  `Cargo.toml`, `Cargo.lock` or `CHANGELOG.md`, and on demand:
+
+  ```bash
+  scripts/ci/release-dryrun.sh          # current branch (must be pushed)
+  scripts/ci/release-dryrun.sh main     # explicit branch
+  ```
 
 ### Container image
 

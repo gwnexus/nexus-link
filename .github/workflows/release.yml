@@ -5,214 +5,68 @@ on:
     tags:
       - 'v*'
 
-env:
-  CARGO_TERM_COLOR: always
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/nexus-link-service
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Build cross-compiled binaries for each target platform.
-  # Cargo registry + git cache is preserved between runs via Blacksmith cache.
+  # Derive the version from the tag (v0.21.1 -> 0.21.1).
   # ---------------------------------------------------------------------------
-  build-binaries:
-    name: Build (${{ matrix.target }})
+  meta:
+    name: Version from tag
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    strategy:
-      matrix:
-        include:
-          - target: aarch64-unknown-linux-gnu
-            artifact: nexus-link-aarch64-linux
-            docker_platform: linux/arm64
-          - target: x86_64-unknown-linux-gnu
-            artifact: nexus-link-x86_64-linux
-            docker_platform: linux/amd64
-
+    permissions: {}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      # Cargo dependency cache — keyed on Cargo.lock + target triple.
-      # Saves ~60-90s on warm runs by skipping dependency recompilation.
-      - name: Cache cargo registry
-        uses: useblacksmith/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-          key: cargo-registry-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            cargo-registry-${{ matrix.target }}-
-
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build
-        run: cross build --release --target ${{ matrix.target }}
-
-      - name: Package binaries
-        run: |
-          mkdir -p dist
-          cp target/${{ matrix.target }}/release/nexus-link dist/
-          cp target/${{ matrix.target }}/release/nexus-link-agent dist/
-          cp target/${{ matrix.target }}/release/nexus-link-service dist/
-          tar -czf ${{ matrix.artifact }}.tar.gz -C dist .
-
-      # Upload full tarball for GitHub Release
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}.tar.gz
-
-      # Upload the service binary separately for the container build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: nexus-link-service-${{ matrix.target }}
-          path: dist/nexus-link-service
+      - name: Strip leading v
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------------
-  # Build a multi-arch container image from the pre-built binaries.
-  # No compilation — just copies the verified cross-compiled artifact into
-  # a minimal Debian slim image. Eliminates QEMU and cuts build time ~10x.
-  #
-  # Strategy:
-  #   1. Build linux/arm64 image from aarch64 binary → push with arch suffix tag
-  #   2. Build linux/amd64 image from x86_64 binary  → push with arch suffix tag
-  #   3. Create and push a multi-arch manifest that covers both platforms
+  # Build, verify and publish binaries and images (shared with the dry run).
   # ---------------------------------------------------------------------------
-  build-container:
-    name: Container Image (${{ matrix.docker_platform }})
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: [build-binaries]
+  build:
+    name: Build
+    needs: [meta]
     permissions:
-      contents: read
-      packages: write
-    strategy:
-      matrix:
-        include:
-          - target: aarch64-unknown-linux-gnu
-            docker_platform: linux/arm64
-            tag_suffix: arm64
-          - target: x86_64-unknown-linux-gnu
-            docker_platform: linux/amd64
-            tag_suffix: amd64
-
-    steps:
-      - uses: actions/checkout@v4
-
-      # Download the pre-built service binary for this platform
-      - uses: actions/download-artifact@v4
-        with:
-          name: nexus-link-service-${{ matrix.target }}
-          path: dist/
-
-      - name: Mark binary executable
-        run: chmod +x dist/nexus-link-service
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract version tag
-        id: meta
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" >> $GITHUB_OUTPUT
-
-      - name: Setup Blacksmith Builder
-        uses: useblacksmith/setup-docker-builder@v1
-
-      # Build platform-specific image and push with arch-suffixed tag
-      - name: Build and push (${{ matrix.docker_platform }})
-        uses: useblacksmith/build-push-action@v2
-        with:
-          context: .
-          file: docker/Dockerfile.release
-          platforms: ${{ matrix.docker_platform }}
-          push: true
-          tags: |
-            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-${{ matrix.tag_suffix }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
-            org.opencontainers.image.revision=${{ github.sha }}
+      contents: read # checkout in the build jobs
+      packages: write # push images and the multi-arch manifest to GHCR
+    uses: ./.github/workflows/release-build.yml
+    with:
+      version: ${{ needs.meta.outputs.version }}
+      publish: true
 
   # ---------------------------------------------------------------------------
-  # Assemble the multi-arch manifest from the two platform-specific images.
-  # Uses 'docker buildx imagetools create' which correctly merges existing
-  # manifest lists produced by build-push-action (unlike 'docker manifest').
-  # ---------------------------------------------------------------------------
-  publish-manifest:
-    name: Publish Multi-Arch Manifest
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: [build-container]
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup Blacksmith Builder
-        uses: useblacksmith/setup-docker-builder@v1
-
-      - name: Extract version tag
-        id: meta
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          MINOR=$(echo $VERSION | cut -d. -f1-2)
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "minor=${MINOR}" >> $GITHUB_OUTPUT
-          echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" >> $GITHUB_OUTPUT
-
-      - name: Create and push multi-arch manifest
-        run: |
-          IMAGE=${{ steps.meta.outputs.image }}
-          VERSION=${{ steps.meta.outputs.version }}
-          MINOR=${{ steps.meta.outputs.minor }}
-
-          # imagetools create merges existing manifest lists — works with buildx output
-          docker buildx imagetools create \
-            --tag ${IMAGE}:${VERSION} \
-            --tag ${IMAGE}:${MINOR} \
-            --tag ${IMAGE}:latest \
-            ${IMAGE}:${VERSION}-arm64 \
-            ${IMAGE}:${VERSION}-amd64
-
-  # ---------------------------------------------------------------------------
-  # Create the GitHub Release with binary tarballs attached.
-  # Waits for both binary builds and the multi-arch container manifest.
+  # GitHub Release with the binary tarballs, after images are published.
   # ---------------------------------------------------------------------------
   release:
     name: GitHub Release
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: [build-binaries, publish-manifest]
+    needs: [build]
     permissions:
-      contents: write
+      contents: write # create the GitHub Release and upload the tarballs
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: nexus-link-*-linux
           merge-multiple: true
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            nexus-link-aarch64-linux.tar.gz
-            nexus-link-x86_64-linux.tar.gz
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            nexus-link-aarch64-linux.tar.gz \
+            nexus-link-x86_64-linux.tar.gz \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --verify-tag \
+            --generate-notes

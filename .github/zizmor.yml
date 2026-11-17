@@ -1,0 +1,7 @@
+# zizmor configuration (https://docs.zizmor.sh/configuration/)
+rules:
+  # Reusable workflows are called with the documented `./.github/...` form.
+  # The `$/...` self-repository syntax is not used until it is established;
+  # a failure here would only surface during a real release.
+  self-repository:
+    disable: true

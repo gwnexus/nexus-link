@@ -7,6 +7,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -19,11 +26,17 @@ jobs:
         os: [blacksmith-4vcpu-ubuntu-2404, macos-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Installs the exact version pinned in rust-toolchain.toml.
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install
+          rustc --version
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Run unit tests
         run: cargo test --all
@@ -44,11 +57,17 @@ jobs:
           - service-health
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Installs the exact version pinned in rust-toolchain.toml.
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install
+          rustc --version
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Build all binaries
         run: cargo build --all
@@ -220,12 +239,15 @@ jobs:
     if: always()
     steps:
       - name: Check results
+        env:
+          UNIT_RESULT: ${{ needs.unit-tests.result }}
+          INTEGRATION_RESULT: ${{ needs.integration.result }}
         run: |
-          if [ "${{ needs.unit-tests.result }}" != "success" ]; then
+          if [ "$UNIT_RESULT" != "success" ]; then
             echo "Unit tests failed"
             exit 1
           fi
-          if [ "${{ needs.integration.result }}" != "success" ]; then
+          if [ "$INTEGRATION_RESULT" != "success" ]; then
             echo "Integration tests failed"
             exit 1
           fi
