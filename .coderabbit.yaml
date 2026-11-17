@@ -1,0 +1,266 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit configuration for nexus-link (Rust workspace: on-premise node
+# agent, CLI and command service for the Nexus platform).
+#
+# Values not set here fall back to the organization-level configuration
+# (inheritance: true), so shared Nexus defaults live in one place and this
+# file only carries what is specific to nexus-link.
+
+language: en-US
+inheritance: true
+tone_instructions: >-
+  Be concise and technical. Prioritize correctness, security and the hub
+  contract over style. Do not use em-dashes. Skip praise and filler.
+
+reviews:
+  profile: chill
+  high_level_summary: true
+  high_level_summary_instructions: >-
+    Summarize the change for release notes in Keep a Changelog terms
+    (Added, Changed, Fixed, Security). Call out changes to the hub API
+    contract (heartbeat, telemetry, registration, command channel) and any
+    breaking change to public types in nexus-link-core.
+  poem: false
+  in_progress_fortune: false
+  sequence_diagrams: true
+  estimate_code_review_effort: true
+  suggested_labels: true
+  auto_apply_labels: false
+  labeling_instructions:
+    - label: hub-contract
+      instructions: >-
+        Apply when the PR changes a request or response exchanged with the
+        Nexus hub: heartbeat payload, telemetry push, registration, token
+        refresh, command queue or PG listener messages.
+    - label: security
+      instructions: >-
+        Apply when the PR touches authentication, node or command tokens,
+        Ed25519 command signatures, TLS verification, file permissions,
+        secret handling, or the install script.
+    - label: breaking-change
+      instructions: >-
+        Apply when a public item in nexus-link-core changes incompatibly,
+        a config key is renamed or removed, or a CLI flag or command changes
+        behavior.
+    - label: release
+      instructions: >-
+        Apply when the PR bumps the workspace version or edits a released
+        CHANGELOG section.
+
+  merge_risk_instructions: >-
+    High risk: changes to the command channel (nexus-link-service handlers,
+    middleware, Ed25519 verification), token handling, TLS verification in
+    the PG listener, config file permissions, install.sh, systemd unit
+    generation, and the release workflow. Medium risk: hub payload formats
+    (heartbeat, telemetry), config schema and defaults, multi-profile path
+    resolution. Low risk: tests, docs, CHANGELOG, devbox scripts.
+
+  security_risk_instructions: >-
+    nexus-link runs on customer-owned on-premise AI hardware. The agent only
+    makes outbound HTTPS calls to the Nexus hub with a node token. The
+    service (axum) exposes a local API: /commands behind the node token,
+    compose routes behind a dedicated command token with optional Ed25519
+    signed commands (ADR-0004), /health public. It can
+    edit compose files and start or stop containers, so any path, input or
+    auth weakness there means code execution on the node. Local runtime
+    endpoints and keys (agent.models_url, agent.models_api_key) must never
+    be sent to the hub. install.sh is piped to bash by users.
+
+  path_filters:
+    - "!target/**"
+    - "!**/Cargo.lock"
+    - "!devbox.lock"
+    # Agent tooling, managed outside this repository
+    - "!.claude/**"
+    - "!.nexus/**"
+    - "!.taskmaster/**"
+    - "!.rtk/**"
+    - "!CLAUDE.md"
+    - "!.cursorrules"
+    - "!.github/copilot-instructions.md"
+    - "!taskmaster.config.yaml"
+
+  path_instructions:
+    - path: "crates/**/*.rs"
+      instructions: |
+        Rust 2024 edition workspace; CI runs fmt, clippy with -D warnings and
+        tests on Linux and macOS.
+        - No unwrap(), expect() or panic!() in non-test code paths that can
+          fail at runtime; propagate errors (thiserror in nexus-link-core,
+          anyhow in binaries).
+        - Never log secrets: node tokens, command tokens, API keys, signing
+          keys, or URLs that may carry credentials. reqwest errors are logged
+          with e.without_url().
+        - Every outbound HTTP request needs a timeout.
+        - Blocking work (file IO in loops, process spawning) must not run on
+          the async runtime without spawn_blocking or tokio equivalents.
+        - Public items in nexus-link-core are used by agent, cli and service;
+          flag incompatible changes and check all call sites.
+    - path: "crates/nexus-link-core/src/heartbeat.rs"
+      instructions: |
+        This file encodes the heartbeat contract agreed with the hub.
+        - Model ids and backing_model: letters, digits and . _ : / @ + -,
+          at most 200 characters; at most 50 entries; invalid and duplicate
+          ids dropped.
+        - `models` is omitted (not an empty list) when the runtime could not
+          be queried; an empty list means "serves nothing".
+        - Optional fields are omitted when unknown, never sent as null.
+        - Nothing from litellm_params other than `model` may reach the
+          payload (no api_base, keys or endpoints).
+        Any change here needs matching tests in tests/src/heartbeat_tests.rs
+        and a CHANGELOG entry.
+    - path: "crates/nexus-link-service/**"
+      instructions: |
+        Command and control surface on the node (ADR-0002, ADR-0003,
+        ADR-0004). Review as security-critical:
+        - Every route except /health must sit behind an auth middleware:
+          /commands requires the node token (nxs_node_*), compose routes the
+          command token (nxs_cmd_*). New routes must not be merged into
+          public_routes().
+        - Compose and config file operations must reject path traversal and
+          stay inside the configured directories.
+        - No user-controlled input in shell commands; pass arguments as a
+          list, never through a shell.
+        - TLS verification in the PG listener must not be weakened.
+    - path: "crates/nexus-link-core/src/{config,token,setup}.rs"
+      instructions: |
+        Config and token files hold credentials. Files must be created with
+        0600 permissions (directories 0700) before secrets are written.
+        Multi-profile resolution (ADR-0005) must keep the default profile
+        backward compatible (config.toml, existing service names).
+    - path: "crates/nexus-link-cli/**"
+      instructions: |
+        User-facing CLI. Check that config keys stay in sync between
+        config show/set/get and the Config struct, that errors are
+        actionable, and that `--profile` is honored by every command.
+    - path: "tests/**"
+      instructions: |
+        Integration-style tests live in the separate `tests` crate, one file
+        per core module. Prefer asserting on serialized JSON for hub
+        payloads. Test data must not contain realistic secrets.
+    - path: "install.sh"
+      instructions: |
+        Piped to bash by end users. Must keep `set -euo pipefail`, verify
+        downloads, never echo tokens, and quote all variables. Changes to
+        default install paths or version resolution are breaking.
+    - path: "scripts/**/*.sh"
+      instructions: |
+        Developer tooling (devbox). Prefer portability between macOS (BSD)
+        and Linux (GNU) tools; quote variables; fail fast.
+    - path: ".github/workflows/**"
+      instructions: |
+        Use least-privilege `permissions:`. Prefer pinning third-party
+        actions to a commit SHA. Releases are triggered by v* tags only;
+        check that release artifacts and the ghcr.io image tag match the
+        workspace version.
+    - path: "docker/**"
+      instructions: |
+        Runtime images must run as the non-root nexus-link user. Prefer
+        pinned base image versions over `latest`.
+    - path: "CHANGELOG.md"
+      instructions: |
+        Keep a Changelog format. Since 0.21.0 MAJOR.MINOR follows the Nexus
+        Hub release line (ADR-0006); PATCH is independent. Every user-facing
+        change and every hub contract change needs an entry.
+    - path: "**/*.md"
+      instructions: |
+        Repository docs are written in English. Do not use em-dashes. Check
+        that documented config keys, CLI commands and versions match the
+        code.
+
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+    base_branches:
+      - "main"
+      - "staging/release-.*"
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT REVIEW"
+
+  pre_merge_checks:
+    title:
+      mode: warning
+      requirements: >-
+        Conventional Commits: `type(scope): subject`, under 72 characters,
+        no emojis. Allowed types: feat, fix, docs, chore, refactor, test, ci,
+        perf, build. Release PRs use `chore(release): X.Y.Z`.
+    description:
+      mode: warning
+    custom_checks:
+      - name: Changelog entry
+        mode: warning
+        instructions: >-
+          Pass if the PR changes no file under crates/, install.sh or
+          docker/. Otherwise pass only if CHANGELOG.md is modified with an
+          entry describing the change, or the PR description states why no
+          entry is needed.
+      - name: Tests for core changes
+        mode: warning
+        instructions: >-
+          Pass if no file under crates/nexus-link-core/src/ changes
+          behavior. Otherwise pass only if the PR adds or updates tests in
+          tests/src/ or in a #[cfg(test)] module covering the changed
+          behavior.
+      - name: No AI attribution
+        mode: error
+        instructions: >-
+          Fail if the PR title, PR description or any commit message
+          contains a Co-Authored-By line for an AI assistant or a
+          "generated with" note for an AI tool. Otherwise pass.
+
+  tools:
+    clippy:
+      enabled: true
+    gitleaks:
+      enabled: true
+    trufflehog:
+      enabled: true
+    osvScanner:
+      enabled: true
+    shellcheck:
+      enabled: true
+    actionlint:
+      enabled: true
+    zizmor:
+      enabled: true
+    hadolint:
+      enabled: true
+    trivy:
+      enabled: true
+    checkmake:
+      enabled: true
+    markdownlint:
+      enabled: true
+    yamllint:
+      enabled: true
+    github-checks:
+      enabled: true
+    languagetool:
+      enabled: true
+      level: default
+    # Not relevant for this Rust workspace
+    ruff:
+      enabled: false
+    biome:
+      enabled: false
+    eslint:
+      enabled: false
+
+chat:
+  auto_reply: true
+  art: false
+  allow_non_org_members: false
+
+knowledge_base:
+  learnings:
+    scope: auto
+  pull_requests:
+    scope: auto
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "CONTRIBUTING.md"
+      - "SECURITY.md"
