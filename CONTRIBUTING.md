@@ -11,6 +11,7 @@ Thank you for your interest in contributing to Nexus Link.
 ## Requirements
 
 - [rustup](https://rustup.rs); the exact Rust version is pinned in `rust-toolchain.toml` and installed automatically (`rustup toolchain install`)
+- When bumping Rust, run `scripts/ci/check-rust-version.sh --fix` so the Docker builders (`ARG RUST_VERSION`) follow `rust-toolchain.toml`; CI rejects drift
 - Docker (for container-related testing)
 - `cargo fmt` and `cargo clippy` must pass without warnings
 

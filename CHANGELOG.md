@@ -13,6 +13,23 @@ it is built against (ADR-0006): nexus-link `0.21.x` targets Nexus Hub `0.21.x`.
 this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
 0.11.0 used independent numbering.
 
+## [Unreleased]
+
+### Changed
+
+- **Docker builders pinned to the toolchain version.** `Dockerfile.service`
+  and `Dockerfile.native` built with `rust:latest`; they now use
+  `rust:${RUST_VERSION}-bookworm` with `ARG RUST_VERSION` equal to
+  `rust-toolchain.toml` (1.100.0). `make docker-build` passes the version
+  from the toolchain file.
+- All runtime stages use `debian:bookworm-slim` pinned by digest; Dependabot
+  tracks the digest (`docker` ecosystem).
+- `scripts/ci/check-rust-version.sh` (CI and `make check-rust-version`)
+  enforces one Rust version across `rust-toolchain.toml` and `docker/`;
+  `--fix` syncs the Dockerfiles after a toolchain bump.
+- hadolint clean: `--no-install-recommends`, consolidated `RUN` steps;
+  `.hadolint.yaml` documents why apt package versions are not pinned.
+
 ## [0.21.3] - 2026-11-17
 
 ### Security

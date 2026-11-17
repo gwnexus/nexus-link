@@ -1,9 +1,13 @@
 # Native aarch64 build (for building directly on Spark or ARM CI)
 # No cross-compilation needed -- builds natively on ARM64
 
-FROM rust:latest AS builder
+# Rust version: keep in sync with rust-toolchain.toml (single source of
+# truth); scripts/ci/check-rust-version.sh enforces it in CI.
+ARG RUST_VERSION=1.100.0
 
-RUN apt-get update && apt-get install -y \
+FROM rust:${RUST_VERSION}-bookworm AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
@@ -18,11 +22,13 @@ COPY crates/nexus-link-service/Cargo.toml crates/nexus-link-service/
 COPY tests/Cargo.toml tests/
 
 # Create dummy sources for dependency caching
-RUN mkdir -p crates/nexus-link-core/src && echo "pub fn placeholder() {}" > crates/nexus-link-core/src/lib.rs
-RUN mkdir -p crates/nexus-link-cli/src && echo "fn main() {}" > crates/nexus-link-cli/src/main.rs
-RUN mkdir -p crates/nexus-link-agent/src && echo "fn main() {}" > crates/nexus-link-agent/src/main.rs
-RUN mkdir -p crates/nexus-link-service/src && echo "fn main() {}" > crates/nexus-link-service/src/main.rs
-RUN mkdir -p tests/src && echo "" > tests/src/lib.rs
+RUN mkdir -p crates/nexus-link-core/src crates/nexus-link-cli/src \
+        crates/nexus-link-agent/src crates/nexus-link-service/src tests/src \
+    && echo "pub fn placeholder() {}" > crates/nexus-link-core/src/lib.rs \
+    && echo "fn main() {}" > crates/nexus-link-cli/src/main.rs \
+    && echo "fn main() {}" > crates/nexus-link-agent/src/main.rs \
+    && echo "fn main() {}" > crates/nexus-link-service/src/main.rs \
+    && echo "" > tests/src/lib.rs
 
 # Build dependencies only
 RUN cargo build --release -p nexus-link-service 2>/dev/null || true
@@ -30,16 +36,16 @@ RUN cargo build --release -p nexus-link-service 2>/dev/null || true
 # Copy real source
 COPY crates/ crates/
 COPY tests/ tests/
-RUN find crates -name "*.rs" -exec touch {} \;
-RUN find tests -name "*.rs" -exec touch {} \;
 
-# Build all binaries (service + agent + cli)
-RUN cargo build --release
+# Build all binaries (service + agent + cli); touch sources first so
+# cargo rebuilds them over the cached dummy crates
+RUN find crates tests -name "*.rs" -exec touch {} + \
+    && cargo build --release
 
 # --- Runtime stage ---
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     && rm -rf /var/lib/apt/lists/*

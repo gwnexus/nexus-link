@@ -535,8 +535,19 @@ Registration includes an automatic preflight check:
 All workflows pin actions to commit SHAs, run with least-privilege
 `permissions:`, and build with the Rust version pinned in
 `rust-toolchain.toml`. Dependabot (`.github/dependabot.yml`) bumps actions,
-Cargo dependencies and the toolchain weekly. actionlint and zizmor configs
-live in `.github/`.
+Cargo dependencies, the toolchain and the Debian base image digest weekly.
+actionlint and zizmor configs live in `.github/`, hadolint's in
+`.hadolint.yaml`.
+
+**One Rust version everywhere.** `rust-toolchain.toml` is the single source
+of truth: CI and the release build install it with `rustup toolchain
+install`, rustup applies it locally and in devbox. The Docker builders
+(`docker/Dockerfile.service`, `docker/Dockerfile.native`) cannot read it and
+carry the same version as `ARG RUST_VERSION`; `make docker-build` passes it
+from the toolchain file. `scripts/ci/check-rust-version.sh` runs in CI and
+fails on any drift, a floating `:latest` image or an unpinned Debian base.
+To bump Rust: change `channel` in `rust-toolchain.toml` (or take the
+Dependabot PR), run `scripts/ci/check-rust-version.sh --fix`, commit both.
 
 - **CI** (`ci.yml`) and **Integration Tests** (`integration.yml`): every push
   and PR to `main`, on Linux and macOS: `cargo fmt --check`,

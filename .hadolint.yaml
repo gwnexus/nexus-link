@@ -1,0 +1,6 @@
+# hadolint configuration (also picked up by CodeRabbit).
+ignored:
+  # Pinning apt package versions breaks builds whenever Debian replaces a
+  # version with a security update. Reproducibility comes from the base
+  # image digest instead (debian:bookworm-slim@sha256:..., see docker/).
+  - DL3008
