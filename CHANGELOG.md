@@ -13,6 +13,16 @@ it is built against (ADR-0006): nexus-link `0.21.x` targets Nexus Hub `0.21.x`.
 this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
 0.11.0 used independent numbering.
 
+## [Unreleased]
+
+### Fixed
+
+- **Release image builds use the Blacksmith builder again.**
+  `useblacksmith/setup-docker-builder` 2.3.0 requires a `cache-key`; without
+  it the builder setup failed and builds fell back to the local builder.
+  The key is set per platform (`docker/Dockerfile.release-<arch>`) so the
+  arm64 and amd64 layer caches do not evict each other.
+
 ## [0.21.4] - 2026-11-17
 
 ### Security

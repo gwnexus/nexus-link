@@ -225,6 +225,9 @@ jobs:
 
       - name: Setup Blacksmith Builder
         uses: useblacksmith/setup-docker-builder@06dd9c83a5d541274d2e3ac67625560979275267 # v2.3.0
+        with:
+          # Required since v2; one layer cache per platform avoids thrashing.
+          cache-key: docker/Dockerfile.release-${{ matrix.tag_suffix }}
 
       - name: Build${{ inputs.publish && ' and push' || '' }} (${{ matrix.docker_platform }})
         uses: useblacksmith/build-push-action@9b0579bbec7a6cad2f171596c57e7ac1e7658850 # v2.3.0
@@ -261,6 +264,8 @@ jobs:
 
       - name: Setup Blacksmith Builder
         uses: useblacksmith/setup-docker-builder@06dd9c83a5d541274d2e3ac67625560979275267 # v2.3.0
+        with:
+          cache-key: nexus-link-service-manifest
 
       - name: Create and push multi-arch manifest
         env:
