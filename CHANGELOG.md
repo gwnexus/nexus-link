@@ -13,6 +13,34 @@ it is built against (ADR-0006): nexus-link `0.21.x` targets Nexus Hub `0.21.x`.
 this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
 0.11.0 used independent numbering.
 
+## [Unreleased]
+
+### Fixed
+
+- Agent container stats could panic on a container without an id
+  (`&id[..12]` slice in the stats error path).
+
+### Changed
+
+- **Dependencies:** bollard 0.18 to 0.21 (agent container stats migrated to
+  `bollard::query_parameters` and `ContainerStatsResponse`, whose fields are
+  now all optional; missing values count as 0), tower-http 0.7, toml 1.2,
+  base64 0.23, tokio-postgres-rustls 0.14, plus the minor/patch group and
+  `useblacksmith/setup-docker-builder` 2.3.0 (Dependabot #3 to #9).
+
+- **Docker builders pinned to the toolchain version.** `Dockerfile.service`
+  and `Dockerfile.native` built with `rust:latest`; they now use
+  `rust:${RUST_VERSION}-bookworm` with `ARG RUST_VERSION` equal to
+  `rust-toolchain.toml` (1.100.0). `make docker-build` passes the version
+  from the toolchain file.
+- All runtime stages use `debian:bookworm-slim` pinned by digest; Dependabot
+  tracks the digest (`docker` ecosystem).
+- `scripts/ci/check-rust-version.sh` (CI and `make check-rust-version`)
+  enforces one Rust version across `rust-toolchain.toml` and `docker/`;
+  `--fix` syncs the Dockerfiles after a toolchain bump.
+- hadolint clean: `--no-install-recommends`, consolidated `RUN` steps;
+  `.hadolint.yaml` documents why apt package versions are not pinned.
+
 ## [0.21.3] - 2026-11-17
 
 ### Security

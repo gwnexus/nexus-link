@@ -1,6 +1,10 @@
 # Dependency updates. Actions are pinned to commit SHAs; Dependabot bumps
-# the SHA and the version comment together. Docker base images follow once
-# they are pinned (see docker/).
+# the SHA and the version comment together.
+#
+# Rust version: rust-toolchain.toml is the single source of truth (CI,
+# release build, rustup/devbox). The Docker builders carry the same version
+# as `ARG RUST_VERSION`; a toolchain bump PR fails the CI consistency check
+# until `scripts/ci/check-rust-version.sh --fix` is committed on it.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -30,8 +34,7 @@ updates:
           - patch
     open-pull-requests-limit: 5
 
-  # Bumps the pinned channel in rust-toolchain.toml. Keep the Docker builder
-  # image in docker/ on the same Rust version.
+  # Bumps the pinned channel in rust-toolchain.toml (see header).
   - package-ecosystem: rust-toolchain
     directory: /
     schedule:
@@ -40,3 +43,16 @@ updates:
     commit-message:
       prefix: chore
       include: scope
+
+  # Runtime base image digests (debian:bookworm-slim@sha256:...). The Rust
+  # builder image is versioned through rust-toolchain.toml, not here.
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    ignore:
+      - dependency-name: rust

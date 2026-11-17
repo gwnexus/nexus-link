@@ -1,10 +1,12 @@
-.PHONY: build check test fmt lint audit clean deploy-spark docker-build
+.PHONY: build check test fmt lint audit clean deploy-spark docker-build check-rust-version
 
 # Target platform for Spark (DGX ARM64)
 TARGET_ARCH := aarch64-unknown-linux-gnu
 SPARK_HOST := dgx-spark
 SPARK_BIN_DIR := /usr/local/bin
 SPARK_COMPOSE_DIR := /opt/dgx-llm
+# Single source of truth for the Rust version (also used by CI and rustup)
+RUST_VERSION := $(shell sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
 
 # === Development ===
 
@@ -37,9 +39,13 @@ clean:
 
 # === Docker ===
 
+check-rust-version:
+	scripts/ci/check-rust-version.sh
+
 docker-build:
 	docker buildx build \
 		--platform linux/arm64 \
+		--build-arg RUST_VERSION=$(RUST_VERSION) \
 		-f docker/Dockerfile.native \
 		-t nexus-link-service:latest \
 		--load .
