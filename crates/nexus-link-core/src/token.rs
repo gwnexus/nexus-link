@@ -1,5 +1,6 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use rand::Rng;
+// rand 0.10: `fill` lives on `RngExt`; `rng()` is still the thread-local CSPRNG.
+use rand::RngExt;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
