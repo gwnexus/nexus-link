@@ -38,7 +38,7 @@ clap = { version = "4", features = ["derive", "env"] }
 bollard = "0.21"
 
 # System info
-sysinfo = "0.33"
+sysinfo = "0.40"
 
 # Logging & tracing
 tracing = "0.1"
