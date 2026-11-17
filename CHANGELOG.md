@@ -13,9 +13,48 @@ it is built against (ADR-0006): nexus-link `0.21.x` targets Nexus Hub `0.21.x`.
 this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
 0.11.0 used independent numbering.
 
-## [Unreleased]
+## [0.21.2] - 2026-11-17
+
+Signed command queue, step 1 of 2 (Dispatch 747d083f from the hub). Safe with
+the current hub: nothing changes for nodes with `require_signatures = false`
+unless the hub starts sending signed commands. Enforcing signatures on the
+queue (`require_signatures = true`) requires a Nexus Hub that signs queued
+commands; the default changes to `true` for fresh installs in the first
+release after that hub ships.
+
+### Security
+
+- **Ed25519 verification on the command queue.** `put_file`, `activate` and
+  all other queued commands were executed without any signature check;
+  `require_signatures` only protected the local HTTP routes. Queued commands
+  are now verified before execution (`nexus_link_core::signing`):
+  - Message `nexus-cmd-v1`, node id, command id, type, timestamp, nonce and
+    the SHA-256 of the `payload` string (the exact signed JSON arguments), so
+    no cross-language JSON canonicalization is needed.
+  - ±5-minute window; nonce cache shared with the HTTP path; the nonce is only
+    recorded after the signature verified.
+  - With `require_signatures = true` every command type needs a valid
+    signature; rejected commands are not executed and reported as `failed`
+    with an error starting with `signature:`.
+  - Signed commands are always verified, also with enforcement off.
 
 ### Added
+
+- **Heartbeat field `command_signatures`**: `enforced`, `off` or
+  `key_missing`, so the hub can gate runtime mutation on enforcement.
+- `ComposeCommandItem` fields `payload`, `signature`, `timestamp`, `nonce`
+  (optional, older hubs keep working).
+- 26 tests: 20 for verification rules in `tests/src/signing_tests.rs`, 6
+  end-to-end in the poller (unsigned or tampered `put_file` not written,
+  signed `put_file` written once, replay rejected).
+
+### Changed
+
+- Verifying key loading moved from the service into
+  `nexus_link_core::signing::load_verifying_key`, shared with the agent.
+- Poller executes through `CommandContext` instead of `AppState`.
+
+### Added (CI and release tooling)
 
 - **Release dry run.** `release-dryrun.yml` runs the real release build
   without publishing (no image push, no GitHub Release, no tag), on changes
@@ -29,7 +68,7 @@ this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
   grouped).
 - actionlint and zizmor configuration in `.github/`.
 
-### Changed
+### Changed (CI)
 
 - **Rust toolchain pinned** to 1.100.0 in `rust-toolchain.toml`; CI, release
   and local builds use exactly this version (replaces

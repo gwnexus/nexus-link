@@ -15,10 +15,16 @@
 //! - At most 50 entries; invalid and duplicate ids are dropped.
 //! - `models` is omitted (not sent as an empty list) when the runtime could
 //!   not be queried, so a temporary failure keeps the last known inventory.
+//!
+//! Since 0.21.2 the heartbeat also reports `command_signatures`
+//! (`enforced`, `off` or `key_missing`), so the hub can gate runtime
+//! mutation on signature enforcement (see `crate::signing`).
 
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
+
+use crate::signing::SignatureState;
 
 /// Maximum number of model entries the hub keeps per node.
 pub const MAX_MODELS: usize = 50;
@@ -101,6 +107,9 @@ pub struct HeartbeatPayload {
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub models: Option<Vec<ModelEntry>>,
+    /// Command signature enforcement on this node.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command_signatures: Option<SignatureState>,
 }
 
 impl HeartbeatPayload {
@@ -109,7 +118,14 @@ impl HeartbeatPayload {
         Self {
             status: "online".to_string(),
             models,
+            command_signatures: None,
         }
+    }
+
+    /// Add the command signature enforcement state.
+    pub fn with_command_signatures(mut self, state: SignatureState) -> Self {
+        self.command_signatures = Some(state);
+        self
     }
 }
 

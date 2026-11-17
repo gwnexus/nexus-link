@@ -23,6 +23,7 @@ built against (ADR-0006):
 | nexus-link | Nexus Hub | Notes |
 |---|---|---|
 | 0.21.x | >= 0.21.0 | Heartbeat with served-model inventory (`models`) |
+| 0.21.2+ | >= 0.21.0 | Signed queue commands verified when the hub sends them; enforcement (`require_signatures = true`) needs a hub that signs queued commands |
 | 0.7.0 to 0.11.0 | any (pre-alignment) | Independent numbering before ADR-0006 |
 
 ## Install
@@ -199,6 +200,52 @@ nexus-link config set compose.require_signatures true
 ```
 
 Read-only routes (GET) never require a signature.
+
+### Signed command queue (v0.21.2+)
+
+Commands fetched from the queue (`GET /api/nodes/{id}/compose/commands/pending`)
+are verified before execution. A signed item carries the arguments as the
+exact JSON string the hub signed:
+
+```json
+{
+  "id": "cmd-123",
+  "type": "put_file",
+  "payload": "{\"content\":\"services: ...\"}",
+  "signature": "<hex, 64-byte Ed25519 signature>",
+  "timestamp": "2026-11-17T04:30:00Z",
+  "nonce": "<unique per signature>"
+}
+```
+
+**Signed message** (UTF-8, lines joined with `\n`, no trailing newline):
+
+```
+nexus-cmd-v1
+<node_id>
+<command id>
+<type>
+<timestamp>
+<nonce>
+<sha256 hex of the payload string>
+```
+
+- Node id and command id are part of the signature, so a signed command
+  cannot be replayed to another node or under another id. ±5-minute window and
+  a nonce cache (shared with the HTTP path) prevent replays on the same node.
+- With `compose.require_signatures = true`, **every** queued command type needs
+  a valid signature. Unsigned or invalid commands are not executed and are
+  reported back as `failed` with an error starting with `signature:`.
+- A command that carries a signature is always verified, also with
+  enforcement off; an invalid signature is rejected.
+- `payload` takes precedence over the legacy `args` object.
+
+The heartbeat reports the enforcement state as `command_signatures`:
+`enforced`, `off`, or `key_missing` (enforcement on but no verifying key; the
+node rejects every command).
+
+> Do not enable `require_signatures` on a node before its hub signs queued
+> commands, or the command queue stops working.
 
 ---
 

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use bollard::Docker;
 use ed25519_dalek::VerifyingKey;
 use nexus_link_core::config::{Config, dirs_home};
+use nexus_link_core::signing::{KeyLoad, NonceCache, load_verifying_key};
 use nexus_link_core::token::hash_token;
 use tracing::warn;
 
@@ -21,6 +21,9 @@ pub struct AppState {
     pub node_token_hash: String,
     /// Pre-computed SHA-256 hash of the cmd token (SEC-004). None if C&C not configured.
     pub cmd_token_hash: Option<String>,
+    /// Nonce replay cache (SEC-005), shared by the HTTP command path and the
+    /// command queue so a nonce is accepted once across both.
+    pub nonces: NonceCache,
 }
 
 impl AppState {
@@ -35,6 +38,7 @@ impl AppState {
             signing_pubkey,
             node_token_hash,
             cmd_token_hash,
+            nonces: NonceCache::new(),
         })
     }
 }
@@ -42,51 +46,23 @@ impl AppState {
 /// Type alias for shared state
 pub type SharedState = Arc<AppState>;
 
-/// Load the Ed25519 verifying key.
-///
-/// Priority:
-///   1. `~/.nexus-link/signing_key.pub`  (base64url-encoded 32-byte key)
-///   2. `config.compose.signing_public_key` (same format, inline in config.toml)
-///
-/// Returns `None` and logs a warning if neither source is available.
+/// Load the Ed25519 verifying key (see `nexus_link_core::signing`):
+/// `~/.nexus-link/signing_key.pub` first, then `compose.signing_public_key`.
 fn load_signing_pubkey(config: &Config) -> Option<VerifyingKey> {
-    // Priority 1: file on disk
-    let key_path = dirs_home().join("signing_key.pub");
-    if let Ok(content) = std::fs::read_to_string(&key_path) {
-        if let Some(key) = decode_verifying_key(content.trim()) {
-            return Some(key);
-        }
-        warn!(
-            path = %key_path.display(),
-            "signing_key.pub exists but could not be parsed as a base64url Ed25519 verifying key"
-        );
+    let load = load_verifying_key(&config.compose, &dirs_home());
+    match &load {
+        KeyLoad::Loaded(_) => {}
+        KeyLoad::Invalid(source) => warn!(
+            source,
+            "Ed25519 verifying key could not be parsed (expected base64url, 32 bytes)"
+        ),
+        KeyLoad::Missing => {}
     }
-
-    // Priority 2: config field
-    if let Some(ref b64) = config.compose.signing_public_key {
-        if let Some(key) = decode_verifying_key(b64.trim()) {
-            return Some(key);
-        }
-        warn!(
-            "compose.signing_public_key in config.toml could not be parsed as \
-             a base64url Ed25519 verifying key"
-        );
-    }
-
-    // Neither source available
-    if config.compose.require_signatures {
+    if config.compose.require_signatures && load.key().is_none() {
         warn!(
             "compose.require_signatures = true but no Ed25519 public key is configured; \
-             write operations will be rejected with 403"
+             all signed command paths will reject commands"
         );
     }
-
-    None
-}
-
-/// Decode a base64url string into an Ed25519 `VerifyingKey`.
-fn decode_verifying_key(b64: &str) -> Option<VerifyingKey> {
-    let bytes = URL_SAFE_NO_PAD.decode(b64).ok()?;
-    let arr: [u8; 32] = bytes.try_into().ok()?;
-    VerifyingKey::from_bytes(&arr).ok()
+    load.key().copied()
 }

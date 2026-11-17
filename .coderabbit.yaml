@@ -110,6 +110,20 @@ reviews:
           payload (no api_base, keys or endpoints).
         Any change here needs matching tests in tests/src/heartbeat_tests.rs
         and a CHANGELOG entry.
+    - path: "crates/nexus-link-core/src/signing.rs"
+      instructions: |
+        Ed25519 verification of queued commands; the message format is a
+        contract with the hub (Dispatch 747d083f). Treat as security-critical:
+        - The signed message (`nexus-cmd-v1`, node id, command id, type,
+          timestamp, nonce, SHA-256 of the payload string) must not change
+          without a new version prefix and a hub-side change.
+        - Arguments must come from the verified `payload`, never from `args`,
+          when a signature is present.
+        - The nonce is recorded only after successful verification.
+        - With require_signatures every command type must be rejected
+          without a valid signature; rejections never execute anything.
+        Changes need matching tests in tests/src/signing_tests.rs and the
+        poller tests.
     - path: "crates/nexus-link-service/**"
       instructions: |
         Command and control surface on the node (ADR-0002, ADR-0003,

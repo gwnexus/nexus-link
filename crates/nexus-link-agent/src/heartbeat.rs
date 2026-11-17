@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use nexus_link_core::config::Config;
+use nexus_link_core::config::{Config, dirs_home};
 use nexus_link_core::heartbeat::{
     HeartbeatPayload, HeartbeatResponse, ModelEntry, apply_backing_models, model_info_endpoint,
     models_endpoint, parse_model_info, parse_model_list,
 };
+use nexus_link_core::signing::{SignatureState, load_verifying_key, signature_state};
 use tracing::{debug, info, warn};
 
 /// Timeout for the local runtime's model list.
@@ -111,10 +112,19 @@ async fn fetch_model_info(
     }
 }
 
-/// Send one `online` heartbeat, including the model inventory when known.
+/// Command signature enforcement as the service applies it: same config
+/// flag and same key sources (`signing_key.pub`, then config).
+pub fn command_signature_state(config: &Config) -> SignatureState {
+    let key = load_verifying_key(&config.compose, &dirs_home());
+    signature_state(config.compose.require_signatures, &key)
+}
+
+/// Send one `online` heartbeat, including the model inventory when known
+/// and the command signature enforcement state.
 pub async fn send_heartbeat(client: &reqwest::Client, config: &Config) -> anyhow::Result<()> {
     let models = fetch_models(client, config).await;
-    let payload = HeartbeatPayload::online(models);
+    let signatures = command_signature_state(config);
+    let payload = HeartbeatPayload::online(models).with_command_signatures(signatures);
 
     let url = format!(
         "{}/api/nodes/{}/heartbeat",
@@ -138,6 +148,7 @@ pub async fn send_heartbeat(client: &reqwest::Client, config: &Config) -> anyhow
         node_id = %config.node.node_id,
         models_sent = payload.models.as_ref().map(|m| m.len()),
         models_recorded = response.models_recorded,
+        command_signatures = ?signatures,
         "Heartbeat sent"
     );
 

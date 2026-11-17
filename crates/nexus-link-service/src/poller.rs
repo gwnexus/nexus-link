@@ -5,14 +5,21 @@
 //! handler logic, and reports results back via
 //! `PATCH /api/nodes/:id/compose/commands/:cmd_id`.
 //!
+//! Every command passes Ed25519 verification first (`nexus_link_core::signing`).
+//! With `compose.require_signatures = true` unsigned or invalid commands are
+//! rejected, reported to the backend as failed and never executed.
+//!
 //! This module runs as an independent tokio task spawned from main.rs.
 //! It never receives inbound connections — all network traffic is outbound
 //! to the Nexus backend, which works through any NAT/WireGuard/firewall.
 
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
+use ed25519_dalek::VerifyingKey;
+use nexus_link_core::signing::{NonceCache, VerifyContext, verify_queued_command};
 use nexus_link_core::types::{
     ComposeCommandItem, ComposeCommandResult, ComposeCommandStatus, ComposeCommandType,
 };
@@ -35,6 +42,30 @@ fn truncate_output(s: &str) -> String {
             &s[..MAX_OUTPUT_LEN],
             s.len()
         )
+    }
+}
+
+/// Everything command verification and execution need, decoupled from
+/// `AppState` (which also holds a Docker client) so it can be tested.
+pub struct CommandContext<'a> {
+    pub node_id: &'a str,
+    pub compose_dir: PathBuf,
+    pub extra_extensions: &'a [String],
+    pub require_signatures: bool,
+    pub signing_key: Option<&'a VerifyingKey>,
+    pub nonces: &'a NonceCache,
+}
+
+impl<'a> CommandContext<'a> {
+    pub fn from_state(state: &'a AppState) -> Self {
+        Self {
+            node_id: &state.config.node.node_id,
+            compose_dir: state.config.compose.dir.clone(),
+            extra_extensions: &state.config.compose.extra_extensions,
+            require_signatures: state.config.compose.require_signatures,
+            signing_key: state.signing_pubkey.as_ref(),
+            nonces: &state.nonces,
+        }
     }
 }
 
@@ -91,11 +122,11 @@ pub async fn poll_and_execute(state: &Arc<AppState>) -> anyhow::Result<Option<u6
 
     info!(count = commands.len(), "Received compose commands");
 
-    // ── Execute each command sequentially ──────────────────────────────────
-    for cmd in commands {
-        debug!(id = %cmd.id, type_ = ?cmd.command_type, "Executing command");
+    let ctx = CommandContext::from_state(state);
 
-        let result = execute_command(&cmd, state).await;
+    // ── Verify and execute each command sequentially ───────────────────────
+    for cmd in commands {
+        let result = handle_command(&cmd, &ctx).await;
 
         // Report result back to Nexus backend
         let patch_resp = client
@@ -124,22 +155,51 @@ pub async fn poll_and_execute(state: &Arc<AppState>) -> anyhow::Result<Option<u6
     Ok(poll_interval_hint)
 }
 
-/// Execute a single queued command and return the result payload.
-async fn execute_command(cmd: &ComposeCommandItem, state: &Arc<AppState>) -> ComposeCommandResult {
+/// Verify a queued command and execute it only if verification passes.
+/// A rejected command yields a failed result whose error starts with
+/// `signature:`; nothing is executed.
+pub async fn handle_command(
+    cmd: &ComposeCommandItem,
+    ctx: &CommandContext<'_>,
+) -> ComposeCommandResult {
+    let verify_ctx = VerifyContext {
+        node_id: ctx.node_id,
+        require_signatures: ctx.require_signatures,
+        key: ctx.signing_key,
+        nonces: ctx.nonces,
+        now: chrono::Utc::now(),
+    };
+
+    let verified = match verify_queued_command(cmd, &verify_ctx) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(id = %cmd.id, type_ = cmd.command_type.as_str(), error = %e, "Rejected queued command");
+            return ComposeCommandResult {
+                status: ComposeCommandStatus::Failed,
+                result: None,
+                error: Some(e.to_string()),
+            };
+        }
+    };
+
+    if !verified.signed {
+        debug!(id = %cmd.id, "Executing unsigned command (signature enforcement is off)");
+    }
+    debug!(id = %cmd.id, type_ = cmd.command_type.as_str(), signed = verified.signed, "Executing command");
+
+    let args = &verified.args;
     match cmd.command_type {
-        ComposeCommandType::GetFile => execute_get_file(state),
-        ComposeCommandType::PutFile => execute_put_file(cmd, state),
-        ComposeCommandType::Activate => execute_activate(state).await,
-        ComposeCommandType::GetLogsSnapshot => execute_logs_snapshot(cmd, state).await,
-        ComposeCommandType::ValidateYaml => execute_validate_yaml(cmd),
+        ComposeCommandType::GetFile => execute_get_file(&ctx.compose_dir, ctx.extra_extensions),
+        ComposeCommandType::PutFile => execute_put_file(args, &ctx.compose_dir),
+        ComposeCommandType::Activate => execute_activate(&ctx.compose_dir).await,
+        ComposeCommandType::GetLogsSnapshot => execute_logs_snapshot(args, &ctx.compose_dir).await,
+        ComposeCommandType::ValidateYaml => execute_validate_yaml(args),
     }
 }
 
 // ── GetFile ─────────────────────────────────────────────────────────────────
 
-fn execute_get_file(state: &Arc<AppState>) -> ComposeCommandResult {
-    let compose_dir = &state.config.compose.dir;
-
+fn execute_get_file(compose_dir: &Path, extra_extensions: &[String]) -> ComposeCommandResult {
     let compose_path = find_compose_file(compose_dir);
     let Some(ref path) = compose_path else {
         return ComposeCommandResult {
@@ -161,13 +221,10 @@ fn execute_get_file(state: &Arc<AppState>) -> ComposeCommandResult {
     };
 
     // Extra config files
-    let extra_files: Vec<serde_json::Value> =
-        read_extra_files(compose_dir, &state.config.compose.extra_extensions)
-            .into_iter()
-            .map(
-                |(name, file_content)| serde_json::json!({ "name": name, "content": file_content }),
-            )
-            .collect();
+    let extra_files: Vec<serde_json::Value> = read_extra_files(compose_dir, extra_extensions)
+        .into_iter()
+        .map(|(name, file_content)| serde_json::json!({ "name": name, "content": file_content }))
+        .collect();
 
     ComposeCommandResult {
         status: ComposeCommandStatus::Completed,
@@ -182,8 +239,8 @@ fn execute_get_file(state: &Arc<AppState>) -> ComposeCommandResult {
 
 // ── PutFile ─────────────────────────────────────────────────────────────────
 
-fn execute_put_file(cmd: &ComposeCommandItem, state: &Arc<AppState>) -> ComposeCommandResult {
-    let content = match cmd.args.get("content").and_then(|v| v.as_str()) {
+fn execute_put_file(args: &serde_json::Value, compose_dir: &Path) -> ComposeCommandResult {
+    let content = match args.get("content").and_then(|v| v.as_str()) {
         Some(c) => c.to_string(),
         None => {
             return ComposeCommandResult {
@@ -203,7 +260,6 @@ fn execute_put_file(cmd: &ComposeCommandItem, state: &Arc<AppState>) -> ComposeC
         };
     }
 
-    let compose_dir = &state.config.compose.dir;
     if let Err(e) = std::fs::create_dir_all(compose_dir) {
         return ComposeCommandResult {
             status: ComposeCommandStatus::Failed,
@@ -244,14 +300,12 @@ fn execute_put_file(cmd: &ComposeCommandItem, state: &Arc<AppState>) -> ComposeC
 
 // ── Activate ────────────────────────────────────────────────────────────────
 
-async fn execute_activate(state: &Arc<AppState>) -> ComposeCommandResult {
-    let compose_dir = state.config.compose.dir.clone();
-
+async fn execute_activate(compose_dir: &Path) -> ComposeCommandResult {
     let run = timeout(
         Duration::from_secs(120),
         Command::new("docker")
             .args(["compose", "up", "-d"])
-            .current_dir(&compose_dir)
+            .current_dir(compose_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output(),
@@ -300,18 +354,15 @@ async fn execute_activate(state: &Arc<AppState>) -> ComposeCommandResult {
 // ── GetLogsSnapshot ─────────────────────────────────────────────────────────
 
 async fn execute_logs_snapshot(
-    cmd: &ComposeCommandItem,
-    state: &Arc<AppState>,
+    args: &serde_json::Value,
+    compose_dir: &Path,
 ) -> ComposeCommandResult {
-    let tail = cmd
-        .args
+    let tail = args
         .get("tail")
         .and_then(|v| v.as_u64())
         .unwrap_or(100)
         .to_string();
-    let service = cmd.args.get("service").and_then(|v| v.as_str());
-
-    let compose_dir = state.config.compose.dir.clone();
+    let service = args.get("service").and_then(|v| v.as_str());
 
     let mut args = vec![
         "compose".to_string(),
@@ -349,7 +400,7 @@ async fn execute_logs_snapshot(
         Duration::from_secs(15),
         Command::new("docker")
             .args(&args)
-            .current_dir(&compose_dir)
+            .current_dir(compose_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output(),
@@ -391,8 +442,8 @@ async fn execute_logs_snapshot(
 
 /// Dry-run YAML validation — parses content with the same serde_yaml parser
 /// used by `put_file`. Returns `valid: true/false` without writing any file.
-fn execute_validate_yaml(cmd: &ComposeCommandItem) -> ComposeCommandResult {
-    let content = match cmd.args.get("content").and_then(|v| v.as_str()) {
+fn execute_validate_yaml(args: &serde_json::Value) -> ComposeCommandResult {
+    let content = match args.get("content").and_then(|v| v.as_str()) {
         Some(c) => c,
         None => {
             return ComposeCommandResult {
@@ -508,5 +559,155 @@ fn collect_poller_files(
         if let Ok(content) = std::fs::read_to_string(&path) {
             files.push((rel_name, content));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
+    use nexus_link_core::signing::queue_message;
+
+    const NODE: &str = "node-1";
+
+    fn key() -> SigningKey {
+        SigningKey::from_bytes(&[3u8; 32])
+    }
+
+    fn ctx<'a>(
+        dir: &Path,
+        require: bool,
+        vk: Option<&'a VerifyingKey>,
+        nonces: &'a NonceCache,
+    ) -> CommandContext<'a> {
+        CommandContext {
+            node_id: NODE,
+            compose_dir: dir.to_path_buf(),
+            extra_extensions: &[],
+            require_signatures: require,
+            signing_key: vk,
+            nonces,
+        }
+    }
+
+    fn signed(kind: ComposeCommandType, payload: &str, nonce: &str) -> ComposeCommandItem {
+        let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let msg = queue_message(NODE, "cmd-1", kind.as_str(), &ts, nonce, payload);
+        ComposeCommandItem {
+            id: "cmd-1".into(),
+            command_type: kind,
+            payload: Some(payload.into()),
+            signature: Some(hex::encode(key().sign(msg.as_bytes()).to_bytes())),
+            timestamp: Some(ts),
+            nonce: Some(nonce.into()),
+            ..Default::default()
+        }
+    }
+
+    fn unsigned_put(content: &str) -> ComposeCommandItem {
+        ComposeCommandItem {
+            id: "cmd-1".into(),
+            command_type: ComposeCommandType::PutFile,
+            args: serde_json::json!({ "content": content }),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn unsigned_put_file_is_rejected_and_not_written_when_enforced() {
+        let dir = tempfile::tempdir().unwrap();
+        let vk = key().verifying_key();
+        let nonces = NonceCache::new();
+        let result = handle_command(
+            &unsigned_put("services: {}"),
+            &ctx(dir.path(), true, Some(&vk), &nonces),
+        )
+        .await;
+        assert_eq!(result.status, ComposeCommandStatus::Failed);
+        assert!(result.error.unwrap().starts_with("signature: missing"));
+        assert!(!dir.path().join("docker-compose.yaml").exists());
+    }
+
+    #[tokio::test]
+    async fn tampered_put_file_is_rejected_and_not_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let vk = key().verifying_key();
+        let nonces = NonceCache::new();
+        let mut cmd = signed(ComposeCommandType::PutFile, r#"{"content":"a: 1"}"#, "n1");
+        cmd.payload = Some(r#"{"content":"evil: 1"}"#.into());
+        // Rejected regardless of the enforcement flag
+        for require in [true, false] {
+            let result = handle_command(&cmd, &ctx(dir.path(), require, Some(&vk), &nonces)).await;
+            assert_eq!(result.status, ComposeCommandStatus::Failed);
+            assert_eq!(result.error.as_deref(), Some("signature: invalid"));
+        }
+        assert!(!dir.path().join("docker-compose.yaml").exists());
+    }
+
+    #[tokio::test]
+    async fn enforced_without_key_rejects_activate() {
+        let dir = tempfile::tempdir().unwrap();
+        let nonces = NonceCache::new();
+        let cmd = signed(ComposeCommandType::Activate, "{}", "n1");
+        let result = handle_command(&cmd, &ctx(dir.path(), true, None, &nonces)).await;
+        assert_eq!(result.status, ComposeCommandStatus::Failed);
+        assert_eq!(
+            result.error.as_deref(),
+            Some("signature: no verifying key on node")
+        );
+    }
+
+    #[tokio::test]
+    async fn signed_put_file_is_written_when_enforced() {
+        let dir = tempfile::tempdir().unwrap();
+        let vk = key().verifying_key();
+        let nonces = NonceCache::new();
+        let cmd = signed(
+            ComposeCommandType::PutFile,
+            r#"{"content":"services:\n  app:\n    image: busybox\n"}"#,
+            "n1",
+        );
+        let result = handle_command(&cmd, &ctx(dir.path(), true, Some(&vk), &nonces)).await;
+        assert_eq!(
+            result.status,
+            ComposeCommandStatus::Completed,
+            "{:?}",
+            result.error
+        );
+        let written = std::fs::read_to_string(dir.path().join("docker-compose.yaml")).unwrap();
+        assert_eq!(written, "services:\n  app:\n    image: busybox\n");
+
+        // The same signed command cannot be replayed
+        let replay = handle_command(&cmd, &ctx(dir.path(), true, Some(&vk), &nonces)).await;
+        assert_eq!(replay.error.as_deref(), Some("signature: duplicate nonce"));
+    }
+
+    #[tokio::test]
+    async fn unsigned_put_file_still_works_when_not_enforced() {
+        let dir = tempfile::tempdir().unwrap();
+        let nonces = NonceCache::new();
+        let result = handle_command(
+            &unsigned_put("services: {}"),
+            &ctx(dir.path(), false, None, &nonces),
+        )
+        .await;
+        assert_eq!(result.status, ComposeCommandStatus::Completed);
+        assert!(dir.path().join("docker-compose.yaml").exists());
+    }
+
+    #[tokio::test]
+    async fn signed_validate_yaml_uses_payload_args() {
+        let dir = tempfile::tempdir().unwrap();
+        let vk = key().verifying_key();
+        let nonces = NonceCache::new();
+        let mut cmd = signed(
+            ComposeCommandType::ValidateYaml,
+            r#"{"content":"a: ["}"#,
+            "n1",
+        );
+        cmd.args = serde_json::json!({ "content": "a: 1" });
+        let result = handle_command(&cmd, &ctx(dir.path(), true, Some(&vk), &nonces)).await;
+        assert_eq!(result.status, ComposeCommandStatus::Completed);
+        assert_eq!(result.result.unwrap()["valid"], false);
     }
 }

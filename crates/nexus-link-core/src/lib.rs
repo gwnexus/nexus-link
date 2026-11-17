@@ -4,6 +4,7 @@ pub mod heartbeat;
 pub mod network;
 pub mod preflight;
 pub mod setup;
+pub mod signing;
 pub mod telemetry;
 pub mod token;
 pub mod types;

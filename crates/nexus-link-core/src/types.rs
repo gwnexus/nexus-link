@@ -74,9 +74,10 @@ pub struct RegisterResponse {
 // ---------------------------------------------------------------------------
 
 /// Command types supported by the compose command queue.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ComposeCommandType {
+    #[default]
     GetFile,
     PutFile,
     Activate,
@@ -84,14 +85,43 @@ pub enum ComposeCommandType {
     ValidateYaml,
 }
 
+impl ComposeCommandType {
+    /// Wire name, as used in the JSON `type` field and the signed message.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ComposeCommandType::GetFile => "get_file",
+            ComposeCommandType::PutFile => "put_file",
+            ComposeCommandType::Activate => "activate",
+            ComposeCommandType::GetLogsSnapshot => "get_logs_snapshot",
+            ComposeCommandType::ValidateYaml => "validate_yaml",
+        }
+    }
+}
+
 /// A pending command item returned by GET .../compose/commands/pending
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Signed items (see `crate::signing`) carry the arguments as the exact JSON
+/// string the hub signed in `payload`, plus `signature`, `timestamp` and
+/// `nonce`. Unsigned items from older hubs only carry `args`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ComposeCommandItem {
     pub id: String,
     #[serde(rename = "type")]
     pub command_type: ComposeCommandType,
     #[serde(default)]
     pub args: serde_json::Value,
+    /// Arguments as the signed JSON string; takes precedence over `args`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<String>,
+    /// Hex-encoded 64-byte Ed25519 signature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    /// RFC 3339 signing time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<String>,
+    /// Unique per signature (replay protection).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<String>,
 }
 
 /// Result the device sends to PATCH .../compose/commands/:id

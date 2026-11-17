@@ -14,6 +14,8 @@ mod preflight_tests;
 #[cfg(test)]
 mod setup_tests;
 #[cfg(test)]
+mod signing_tests;
+#[cfg(test)]
 mod telemetry_tests;
 #[cfg(test)]
 mod token_tests;
