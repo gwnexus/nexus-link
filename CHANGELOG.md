@@ -13,7 +13,7 @@ it is built against (ADR-0006): nexus-link `0.21.x` targets Nexus Hub `0.21.x`.
 this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
 0.11.0 used independent numbering.
 
-## [Unreleased]
+## [0.21.6] - 2026-11-21
 
 ### Added
 
