@@ -1,4 +1,4 @@
-use nexus_link_core::config::{self, Config, TokenEntry, dirs_home};
+use nexus_link_core::config::{self, Config, TokenEntry};
 use nexus_link_core::heartbeat::HEARTBEAT_SEC_RANGE;
 
 pub async fn show() -> anyhow::Result<()> {
@@ -75,9 +75,18 @@ pub async fn show() -> anyhow::Result<()> {
         Some(t) => println!("  cmd_token        = {}...", &t[..20.min(t.len())]),
         None => println!("  cmd_token        = (not configured — C&C channel disabled)"),
     }
-    match &config.compose.signing_public_key {
-        Some(k) => println!("  signing_key      = {}...", &k[..20.min(k.len())]),
-        None => println!("  signing_key      = (not configured — signatures disabled)"),
+    match (
+        &config.compose.signing_public_keys,
+        &config.compose.signing_public_key,
+    ) {
+        (Some(list), _) => {
+            let shown: Vec<&str> = list.iter().map(|k| &k[..20.min(k.len())]).collect();
+            println!("  signing_keys     = {}... (rotation)", shown.join("..., "));
+        }
+        (None, Some(k)) => println!("  signing_key      = {}...", &k[..20.min(k.len())]),
+        (None, None) => println!(
+            "  signing_key      = (not in config — legacy signing_key.pub is used if present)"
+        ),
     }
     println!(
         "  require_signatures = {}",
@@ -227,27 +236,53 @@ pub async fn set(key: String, value: String) -> anyhow::Result<()> {
             );
         }
         "compose.signing_public_key" | "signing_public_key" => {
-            // Next to the effective config: the first place the service and
-            // agent look (config::signing_key_dirs)
-            let key_path = config::effective_config_path()
-                .parent()
-                .map(std::path::Path::to_path_buf)
-                .unwrap_or_else(dirs_home)
-                .join(nexus_link_core::signing::SIGNING_KEY_FILE);
+            // Only this profile's config; the shared signing_key.pub is left
+            // alone (ADR-0008). A single key ends a rotation list.
             if value.is_empty() {
                 config.compose.signing_public_key = None;
-                let _ = std::fs::remove_file(&key_path);
                 println!("  compose.signing_public_key cleared");
             } else {
-                // Write to signing_key.pub so the service picks it up at next start
-                config::write_private_file(&key_path, value.as_bytes())?;
+                if nexus_link_core::signing::decode_verifying_key(&value).is_none() {
+                    anyhow::bail!("Invalid signing key: expected base64url, 32 bytes");
+                }
                 config.compose.signing_public_key = Some(value.clone());
                 println!(
                     "  compose.signing_public_key = {}...",
                     &value[..20.min(value.len())]
                 );
-                println!("  signing_key.pub written to: {}", key_path.display());
             }
+            if config.compose.signing_public_keys.take().is_some() {
+                println!("  compose.signing_public_keys cleared");
+            }
+            println!("  Restart the service to apply the key");
+        }
+        "compose.signing_public_keys" | "signing_public_keys" => {
+            // Rotation list (ADR-0008), comma-separated, at most two keys.
+            let keys: Vec<String> = value
+                .split(',')
+                .map(|k| k.trim().to_string())
+                .filter(|k| !k.is_empty())
+                .collect();
+            if keys.is_empty() {
+                config.compose.signing_public_keys = None;
+                println!("  compose.signing_public_keys cleared");
+            } else {
+                if keys.len() > nexus_link_core::signing::MAX_SIGNING_KEYS {
+                    anyhow::bail!(
+                        "At most {} signing keys are allowed",
+                        nexus_link_core::signing::MAX_SIGNING_KEYS
+                    );
+                }
+                if keys
+                    .iter()
+                    .any(|k| nexus_link_core::signing::decode_verifying_key(k).is_none())
+                {
+                    anyhow::bail!("Invalid signing key: expected base64url, 32 bytes");
+                }
+                println!("  compose.signing_public_keys = {} key(s)", keys.len());
+                config.compose.signing_public_keys = Some(keys);
+            }
+            println!("  Restart the service to apply the keys");
         }
         _ => {
             anyhow::bail!(
@@ -257,6 +292,7 @@ pub async fn set(key: String, value: String) -> anyhow::Result<()> {
                  api.tokens.telemetry, api.tokens.command,\n  \
                  listen_addr, port, name, tags,\n  \
                  compose_dir, compose.cmd_token, compose.signing_public_key,\n  \
+                 compose.signing_public_keys,\n  \
                  compose.require_signatures, compose.writable",
                 key
             );
@@ -316,6 +352,11 @@ pub async fn get(key: String) -> anyhow::Result<()> {
             .compose
             .signing_public_key
             .unwrap_or_else(|| "(not configured)".to_string()),
+        "compose.signing_public_keys" | "signing_public_keys" => config
+            .compose
+            .signing_public_keys
+            .map(|k| k.join(","))
+            .unwrap_or_else(|| "(not configured)".to_string()),
         _ => {
             anyhow::bail!(
                 "Unknown config key: '{}'\n\nAvailable keys:\n  \
@@ -324,6 +365,7 @@ pub async fn get(key: String) -> anyhow::Result<()> {
                  api.tokens.telemetry, api.tokens.command,\n  \
                  listen_addr, port, name, node_id, tags, token,\n  \
                  compose_dir, compose.cmd_token, compose.signing_public_key,\n  \
+                 compose.signing_public_keys,\n  \
                  compose.require_signatures, compose.writable",
                 key
             );

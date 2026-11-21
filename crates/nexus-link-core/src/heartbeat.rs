@@ -23,6 +23,9 @@
 //! compose writes, whatever the signature state. Since 0.21.5 it reports
 //! `wake_listener` (`connected`, `disconnected` or `unconfigured`), the state
 //! of the command service's PG LISTEN wake-up channel (`crate::wake`).
+//! Since 0.21.6 it reports `signing_key_fingerprints` (ADR-0008): the
+//! fingerprints of the profile's verifying keys, so the hub can check which
+//! key a profile verifies against before it switches keys.
 
 use std::collections::{HashMap, HashSet};
 
@@ -114,6 +117,10 @@ pub struct HeartbeatPayload {
     /// Command signature enforcement on this node.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command_signatures: Option<SignatureState>,
+    /// Fingerprints of the profile's verifying keys (ADR-0008), in source
+    /// order; empty when none is loaded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signing_key_fingerprints: Option<Vec<String>>,
     /// Whether the node may change its compose stack (`compose.writable`).
     /// The hub should offer `put_file`, `activate` and promotion only when
     /// this is not `false` (and signatures are enforced).
@@ -132,6 +139,7 @@ impl HeartbeatPayload {
             status: "online".to_string(),
             models,
             command_signatures: None,
+            signing_key_fingerprints: None,
             compose_writable: None,
             wake_listener: None,
         }
@@ -140,6 +148,12 @@ impl HeartbeatPayload {
     /// Add the command signature enforcement state.
     pub fn with_command_signatures(mut self, state: SignatureState) -> Self {
         self.command_signatures = Some(state);
+        self
+    }
+
+    /// Add the fingerprints of the loaded verifying keys.
+    pub fn with_signing_key_fingerprints(mut self, fingerprints: Vec<String>) -> Self {
+        self.signing_key_fingerprints = Some(fingerprints);
         self
     }
 

@@ -1,5 +1,6 @@
 use nexus_link_core::config::{
-    AgentConfig, ApiConfig, ApiTokens, ComposeConfig, Config, NodeConfig, ServiceConfig, TokenEntry,
+    AgentConfig, ApiConfig, ApiTokens, ComposeConfig, Config, NodeConfig, RegisteredSigningKeys,
+    ServiceConfig, TokenEntry, registered_signing_keys,
 };
 use tempfile::TempDir;
 
@@ -228,6 +229,7 @@ fn test_config_roundtrip_with_custom_compose_dir() {
             extra_extensions: vec![".env".into()],
             cmd_token: Some("nxs_cmd_testtoken".to_string()),
             signing_public_key: None,
+            signing_public_keys: None,
             require_signatures: false,
             writable: true,
         },
@@ -384,4 +386,80 @@ fn test_user_config_written_owner_only() {
     assert_eq!(mode(&path), 0o600);
     assert_eq!(mode(&dir), 0o700);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "secret = 1\n");
+}
+
+// ---------------------------------------------------------------------------
+// Signing keys at registration (ADR-0008)
+// ---------------------------------------------------------------------------
+
+fn compose_with_key(key: Option<&str>, keys: Option<&[&str]>) -> ComposeConfig {
+    ComposeConfig {
+        signing_public_key: key.map(str::to_string),
+        signing_public_keys: keys.map(|k| k.iter().map(|s| s.to_string()).collect()),
+        ..ComposeConfig::default()
+    }
+}
+
+fn single(key: &str) -> RegisteredSigningKeys {
+    RegisteredSigningKeys {
+        signing_public_key: Some(key.to_string()),
+        signing_public_keys: None,
+        kept_existing: false,
+    }
+}
+
+#[test]
+fn test_register_takes_hub_key_on_fresh_profile() {
+    assert_eq!(
+        registered_signing_keys(None, Some("HUB"), false),
+        single("HUB")
+    );
+    let empty = compose_with_key(None, None);
+    assert_eq!(
+        registered_signing_keys(Some(&empty), Some("HUB"), false),
+        single("HUB")
+    );
+}
+
+#[test]
+fn test_register_keeps_differing_profile_key() {
+    let existing = compose_with_key(Some("PROD"), None);
+    let r = registered_signing_keys(Some(&existing), Some("HUB"), false);
+    assert_eq!(r.signing_public_key.as_deref(), Some("PROD"));
+    assert!(r.kept_existing);
+
+    // --replace-signing-key takes the hub's key
+    assert_eq!(
+        registered_signing_keys(Some(&existing), Some("HUB"), true),
+        single("HUB")
+    );
+}
+
+#[test]
+fn test_register_keeps_matching_rotation_list() {
+    let existing = compose_with_key(None, Some(&["NEW", "HUB"]));
+    let r = registered_signing_keys(Some(&existing), Some("HUB"), false);
+    assert_eq!(
+        r.signing_public_keys,
+        Some(vec!["NEW".into(), "HUB".into()])
+    );
+    assert!(!r.kept_existing);
+}
+
+#[test]
+fn test_register_without_hub_key_keeps_configured_key() {
+    let existing = compose_with_key(Some("PROD"), None);
+    let r = registered_signing_keys(Some(&existing), None, true);
+    assert_eq!(r.signing_public_key.as_deref(), Some("PROD"));
+    assert!(!r.kept_existing);
+}
+
+#[test]
+fn test_signing_public_keys_roundtrip_and_omitted_when_unset() {
+    let unset = toml::to_string(&ComposeConfig::default()).unwrap();
+    assert!(!unset.contains("signing_public_keys"));
+    let set = compose_with_key(None, Some(&["A", "B"]));
+    let text = toml::to_string(&set).unwrap();
+    let back: ComposeConfig = toml::from_str(&text).unwrap();
+    assert_eq!(back.signing_public_keys, Some(vec!["A".into(), "B".into()]));
 }

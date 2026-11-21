@@ -1,11 +1,12 @@
 use nexus_link_core::config::{
     AgentConfig, ApiConfig, ApiTokens, ComposeConfig, Config, NodeConfig, SYSTEM_CONFIG_DIR,
-    ServiceConfig, TokenEntry, system_config_path,
+    ServiceConfig, TokenEntry, registered_signing_keys, system_config_path,
 };
 use nexus_link_core::preflight::{self, PreflightVerdict};
 use nexus_link_core::types::RegisterRequest;
 use tracing::info;
 
+#[allow(clippy::too_many_arguments)] // one parameter per CLI flag
 pub async fn execute(
     api_url: String,
     token: String,
@@ -14,6 +15,7 @@ pub async fn execute(
     tags: Vec<String>,
     skip_preflight: bool,
     force: bool,
+    replace_signing_key: bool,
 ) -> anyhow::Result<()> {
     let hostname = hostname::get()
         .map(|h| h.to_string_lossy().to_string())
@@ -113,7 +115,23 @@ pub async fn execute(
 
     // Save config locally — new [api.tokens] + [agent] layout
     let resolved_cmd_token = register_resp.cmd_token.clone().or(cmd_token);
-    let signing_public_key = register_resp.signing_public_key.clone();
+
+    // Per-profile signing keys (ADR-0008): never overwrite a configured,
+    // differing key of this profile unless --replace-signing-key is given.
+    let save_path = if std::path::Path::new(SYSTEM_CONFIG_DIR).exists() {
+        system_config_path()
+    } else {
+        nexus_link_core::config::effective_config_path()
+    };
+    let existing = save_path
+        .exists()
+        .then(|| Config::load_from(save_path.clone()).ok())
+        .flatten();
+    let signing = registered_signing_keys(
+        existing.as_ref().map(|c| &c.compose),
+        register_resp.signing_public_key.as_deref(),
+        replace_signing_key,
+    );
 
     let telemetry_entry = TokenEntry {
         token: register_resp.token.clone(),
@@ -144,7 +162,8 @@ pub async fn execute(
         service: ServiceConfig::default(),
         compose: ComposeConfig {
             cmd_token: resolved_cmd_token,
-            signing_public_key: signing_public_key.clone(),
+            signing_public_key: signing.signing_public_key.clone(),
+            signing_public_keys: signing.signing_public_keys.clone(),
             ..ComposeConfig::default()
         },
     };
@@ -152,24 +171,20 @@ pub async fn execute(
     // Save config to system path (preferred) or fallback to user path.
     // Permissions come from save_to: 0640 root:nexus-link in /etc/nexus-link
     // (service reads, cannot modify), 0600 in ~/.nexus-link.
-    let save_path = if std::path::Path::new(SYSTEM_CONFIG_DIR).exists() {
-        let sys_path = system_config_path();
-        config.save_to(sys_path.clone())?;
-        sys_path
-    } else {
-        config.save()?;
-        nexus_link_core::config::effective_config_path()
-    };
+    // The signing key goes only into this profile's config; the shared
+    // signing_key.pub is no longer written (ADR-0008).
+    config.save_to(save_path.clone())?;
 
-    // Write signing_key.pub next to the config (first place the service and
-    // agent look, see config::signing_key_dirs)
-    if let Some(ref pubkey_b64) = signing_public_key {
-        let key_dir = save_path
-            .parent()
-            .unwrap_or(std::path::Path::new(SYSTEM_CONFIG_DIR));
-        let key_path = key_dir.join(nexus_link_core::signing::SIGNING_KEY_FILE);
-        nexus_link_core::config::write_private_file(&key_path, pubkey_b64.as_bytes())?;
-        println!("  Signing key: {}", key_path.display());
+    if signing.kept_existing {
+        println!(
+            "  Warning: the hub's command signing key differs from the key configured \
+             for this profile; the configured key was kept."
+        );
+        println!("  Re-run with --replace-signing-key to use the hub's key.");
+    } else if config.compose.signing_public_key.is_some()
+        || config.compose.signing_public_keys.is_some()
+    {
+        println!("  Signing key: stored in {}", save_path.display());
     }
 
     println!("Node registered successfully!");

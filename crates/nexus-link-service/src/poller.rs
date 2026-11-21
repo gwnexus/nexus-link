@@ -56,7 +56,7 @@ pub struct CommandContext<'a> {
     pub compose_dir: PathBuf,
     pub extra_extensions: &'a [String],
     pub require_signatures: bool,
-    pub signing_key: Option<&'a VerifyingKey>,
+    pub signing_keys: &'a [VerifyingKey],
     pub nonces: &'a NonceCache,
     /// `compose.writable`; `false` rejects `put_file` and `activate`.
     pub compose_writable: bool,
@@ -69,7 +69,7 @@ impl<'a> CommandContext<'a> {
             compose_dir: state.config.compose.dir.clone(),
             extra_extensions: &state.config.compose.extra_extensions,
             require_signatures: state.config.compose.require_signatures,
-            signing_key: state.signing_pubkey.as_ref(),
+            signing_keys: &state.signing_pubkeys,
             nonces: &state.nonces,
             compose_writable: state.config.compose.writable,
         }
@@ -227,7 +227,7 @@ pub async fn handle_command(
     let verify_ctx = VerifyContext {
         node_id: ctx.node_id,
         require_signatures: ctx.require_signatures,
-        key: ctx.signing_key,
+        keys: ctx.signing_keys,
         nonces: ctx.nonces,
         now: chrono::Utc::now(),
     };
@@ -638,7 +638,7 @@ mod tests {
             compose_dir: dir.to_path_buf(),
             extra_extensions: &[],
             require_signatures: require,
-            signing_key: vk,
+            signing_keys: vk.map(std::slice::from_ref).unwrap_or(&[]),
             nonces,
             compose_writable: true,
         }

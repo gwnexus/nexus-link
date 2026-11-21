@@ -24,6 +24,7 @@ built against (ADR-0006):
 |---|---|---|
 | 0.21.x | >= 0.21.0 | Heartbeat with served-model inventory (`models`) |
 | 0.21.2+ | >= 0.21.0 | Signed queue commands verified when the hub sends them; enforcement (`require_signatures = true`) needs a hub that signs queued commands |
+| 0.21.6+ | >= 0.21.0 | Per-profile signing keys and two-key rotation (ADR-0008); heartbeat `signing_key_fingerprints` |
 | 0.7.0 to 0.11.0 | any (pre-alignment) | Independent numbering before ADR-0006 |
 
 ## Install
@@ -190,8 +191,10 @@ X-Nexus-Nonce:     a3f5c21b9e4d7f08
 - The signing private key never leaves the Nexus backend
 
 **Device setup:** The matching Ed25519 public key (32 bytes, base64url) is
-delivered in the `RegisterResponse` at registration time and written to
-`~/.nexus-link/signing_key.pub`. It is also stored in `config.toml` as fallback.
+delivered in the `RegisterResponse` at registration time and stored as
+`compose.signing_public_key` in the profile's config. See
+[Signing keys per profile](#signing-keys-per-profile-v0216) for precedence and
+key rotation.
 
 Signature enforcement is **opt-in** (default: off for backward compatibility):
 
@@ -252,6 +255,42 @@ node rejects every command).
 > Do not enable `require_signatures` on a node before its hub signs queued
 > commands, or the command queue stops working.
 
+#### Signing keys per profile (v0.21.6+)
+
+Each profile verifies commands (HTTP writes and the queue) against its own
+keys, so profiles on one host that talk to different hubs (e.g. production
+and staging) can use different keypairs (ADR-0008). The first source that is
+set decides:
+
+1. `compose.signing_public_keys`: 1 or 2 keys, for a hub key rotation.
+2. `compose.signing_public_key`: a single key.
+3. `signing_key.pub` (legacy fallback, searched as described in
+   [Profile file layout](#profile-file-layout); shared by all profiles).
+
+A source that is set but invalid (bad key, empty list, more than 2 keys) does
+not fall through to the next one: with enforcement on, every command is
+rejected and the heartbeat reports `key_missing`. Keys are loaded when the
+service starts; restart it after a change.
+
+`register` and `config set` write the key only into the profile's config and
+never create or change `signing_key.pub`. `register` keeps a configured key
+that differs from the hub's key (and prints a warning) unless
+`--replace-signing-key` is given.
+
+**Rotation without a failure window:**
+
+```bash
+sudo nexus-link config set compose.signing_public_keys "<new>,<old>"  # accept both
+sudo systemctl restart nexus-link-service                             # per profile
+# ... the hub switches to the new key ...
+sudo nexus-link config set compose.signing_public_key "<new>"         # clears the list
+sudo systemctl restart nexus-link-service
+```
+
+The heartbeat reports `signing_key_fingerprints`: one entry per loaded key,
+SHA-256 of the raw 32 bytes, first 16 hex characters. The hub can compare
+them with its own key before it switches.
+
 #### Read-only compose (`compose.writable = false`)
 
 For a profile that must not change the compose stack, typically a staging
@@ -295,7 +334,7 @@ nexus-link agent start
 /etc/nexus-link/              0750 root:nexus-link
   config.toml                 0640 root:nexus-link  default profile (production)
   config.staging.toml         0640 root:nexus-link  staging profile
-  signing_key.pub             0640 root:nexus-link  Ed25519 verifying key
+  signing_key.pub             0640 root:nexus-link  legacy verifying key (fallback, shared)
 
 /var/lib/nexus-link/          0700 nexus-link       default profile state
 /var/lib/nexus-link/staging/  0700 nexus-link       staging profile state
@@ -307,9 +346,13 @@ it; only root (`sudo nexus-link config set ...`, `register`, `setup`) writes
 converges an existing install to them. A user-mode config in
 `~/.nexus-link/` is `0600` in a `0700` dir.
 
-The verifying key is looked up as `signing_key.pub` next to the config, then
-in the profile's state dir, `/var/lib/nexus-link/` and `~/.nexus-link/`;
-`compose.signing_public_key` in the config is the fallback.
+The verifying keys come from the profile's config
+(`compose.signing_public_keys`, then `compose.signing_public_key`). Only a
+profile without a key in its config falls back to `signing_key.pub`, looked
+up next to the config, then in the profile's state dir, `/var/lib/nexus-link/`
+and `~/.nexus-link/`. These locations are shared by all profiles, so give
+each profile its own key in its config when the profiles talk to different
+hubs.
 
 ### Systemd services
 
@@ -367,6 +410,7 @@ dir                = "/opt/dgx-llm"   # compose root (docker-compose.yaml locati
 extra_extensions   = [".env", ".conf", ".toml"]
 cmd_token          = "nxs_cmd_..."    # compose management credential
 signing_public_key = "<base64url>"    # Ed25519 verifying key (written at registration)
+# signing_public_keys = ["<new>", "<old>"]  # rotation: both accepted, wins over the above
 require_signatures = false            # set to true to enforce signed writes
 writable           = true             # false: compose read-only (no put_file/activate)
 ```
@@ -377,6 +421,8 @@ writable           = true             # false: compose read-only (no put_file/ac
 nexus-link config show                                    # display full config
 nexus-link config set compose.dir /opt/my-stack          # change compose root
 nexus-link config set compose.require_signatures true     # enable Ed25519
+nexus-link config set compose.signing_public_key <key>    # this profile's key
+nexus-link config set compose.signing_public_keys "<a>,<b>"  # key rotation
 nexus-link config set compose.writable false              # compose read-only
 nexus-link config get node.node_id                        # read a single value
 nexus-link config path                                    # show config file path

@@ -65,6 +65,11 @@ enum Commands {
         /// Force registration even if device is not recommended
         #[arg(long)]
         force: bool,
+
+        /// Replace a configured command signing key of this profile with the
+        /// hub's key (by default a differing key is kept, ADR-0008)
+        #[arg(long)]
+        replace_signing_key: bool,
     },
 
     /// Run device preflight check without registering
@@ -193,6 +198,7 @@ async fn main() -> anyhow::Result<()> {
             tags,
             skip_preflight,
             force,
+            replace_signing_key,
         } => {
             commands::register::execute(
                 api_url,
@@ -202,6 +208,7 @@ async fn main() -> anyhow::Result<()> {
                 tags,
                 skip_preflight,
                 force,
+                replace_signing_key,
             )
             .await
         }

@@ -135,7 +135,7 @@ fn ctx<'a>(
     VerifyContext {
         node_id,
         require_signatures: true,
-        key: Some(key),
+        keys: std::slice::from_ref(key),
         nonces,
         now,
     }

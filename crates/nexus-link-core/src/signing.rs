@@ -1,7 +1,7 @@
 //! Ed25519 verification of signed C&C commands (ADR-0004, hub ADR-0051).
 //!
 //! The hub signs commands with its private key; the node verifies them with
-//! the public key it received at registration (`signing_key.pub`).
+//! the public keys of the active profile (ADR-0008, `load_verifying_keys`).
 //!
 //! This module covers the command queue (`GET .../compose/commands/pending`).
 //! A signed queue item carries the arguments as the exact JSON string the hub
@@ -58,54 +58,79 @@ pub fn decode_verifying_key(b64: &str) -> Option<VerifyingKey> {
     VerifyingKey::from_bytes(&arr).ok()
 }
 
-/// Where a verifying key came from, or why none could be loaded.
+/// Maximum number of keys in `compose.signing_public_keys` (ADR-0008): the
+/// current key and the next one during a hub key rotation.
+pub const MAX_SIGNING_KEYS: usize = 2;
+
+/// Where the verifying keys came from, or why none could be loaded.
 #[derive(Debug)]
 pub enum KeyLoad {
-    Loaded(VerifyingKey),
-    /// Neither the key file nor `compose.signing_public_key` is present.
+    /// One or more keys; a signature is valid if any of them verifies it.
+    Loaded(Vec<VerifyingKey>),
+    /// No key source is set.
     Missing,
-    /// A source exists but does not hold a valid key; names the source.
+    /// A source is set but does not hold valid keys; names the source.
     Invalid(&'static str),
 }
 
 impl KeyLoad {
-    pub fn key(&self) -> Option<&VerifyingKey> {
+    /// The loaded keys; empty when missing or invalid.
+    pub fn keys(&self) -> &[VerifyingKey] {
         match self {
-            KeyLoad::Loaded(k) => Some(k),
-            _ => None,
+            KeyLoad::Loaded(k) => k,
+            _ => &[],
         }
     }
 }
 
-/// Load the verifying key: the first `signing_key.pub` found in `key_dirs`
-/// (in order, see `config::signing_key_dirs`), then
-/// `compose.signing_public_key` from the config. An invalid key file does
-/// not fall through to another file or to the config value silently; the
-/// caller logs it.
-pub fn load_verifying_key(compose: &ComposeConfig, key_dirs: &[PathBuf]) -> KeyLoad {
-    let mut invalid = None;
-
-    if let Some(content) = key_dirs
-        .iter()
-        .find_map(|dir| std::fs::read_to_string(dir.join(SIGNING_KEY_FILE)).ok())
-    {
-        match decode_verifying_key(&content) {
-            Some(key) => return KeyLoad::Loaded(key),
-            None => invalid = Some(SIGNING_KEY_FILE),
-        }
+/// Load the verifying keys of one profile (ADR-0008). The first source that
+/// is set decides:
+///
+/// 1. `compose.signing_public_keys` (1 to `MAX_SIGNING_KEYS` keys),
+/// 2. `compose.signing_public_key`,
+/// 3. the first `signing_key.pub` found in `key_dirs` (legacy fallback, see
+///    `config::signing_key_dirs`; these dirs are shared between profiles).
+///
+/// A source that is set but invalid does not fall through to a lower one;
+/// the caller logs it and enforcement rejects every command.
+pub fn load_verifying_keys(compose: &ComposeConfig, key_dirs: &[PathBuf]) -> KeyLoad {
+    if let Some(ref list) = compose.signing_public_keys {
+        let keys: Option<Vec<VerifyingKey>> =
+            list.iter().map(|b64| decode_verifying_key(b64)).collect();
+        return match keys {
+            Some(k) if !k.is_empty() && k.len() <= MAX_SIGNING_KEYS => KeyLoad::Loaded(k),
+            _ => KeyLoad::Invalid("compose.signing_public_keys"),
+        };
     }
 
     if let Some(ref b64) = compose.signing_public_key {
-        match decode_verifying_key(b64) {
-            Some(key) => return KeyLoad::Loaded(key),
-            None => invalid = invalid.or(Some("compose.signing_public_key")),
-        }
+        return match decode_verifying_key(b64) {
+            Some(key) => KeyLoad::Loaded(vec![key]),
+            None => KeyLoad::Invalid("compose.signing_public_key"),
+        };
     }
 
-    match invalid {
-        Some(source) => KeyLoad::Invalid(source),
+    match key_dirs
+        .iter()
+        .find_map(|dir| std::fs::read_to_string(dir.join(SIGNING_KEY_FILE)).ok())
+    {
+        Some(content) => match decode_verifying_key(&content) {
+            Some(key) => KeyLoad::Loaded(vec![key]),
+            None => KeyLoad::Invalid(SIGNING_KEY_FILE),
+        },
         None => KeyLoad::Missing,
     }
+}
+
+/// Whether any of `keys` verifies `signature` over `message`.
+pub fn verify_any(keys: &[VerifyingKey], message: &[u8], signature: &Signature) -> bool {
+    keys.iter().any(|k| k.verify(message, signature).is_ok())
+}
+
+/// Fingerprint of a verifying key as the hub shows it: SHA-256 of the raw
+/// 32 bytes, first 16 hex characters.
+pub fn key_fingerprint(key: &VerifyingKey) -> String {
+    hex::encode(Sha256::digest(key.as_bytes()))[..16].to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -127,10 +152,10 @@ pub enum SignatureState {
 
 /// Enforcement state from the config and the key load result.
 pub fn signature_state(require_signatures: bool, key: &KeyLoad) -> SignatureState {
-    match (require_signatures, key.key()) {
+    match (require_signatures, key.keys().is_empty()) {
         (false, _) => SignatureState::Off,
-        (true, Some(_)) => SignatureState::Enforced,
-        (true, None) => SignatureState::KeyMissing,
+        (true, false) => SignatureState::Enforced,
+        (true, true) => SignatureState::KeyMissing,
     }
 }
 
@@ -203,7 +228,8 @@ pub struct VerifiedCommand {
 pub struct VerifyContext<'a> {
     pub node_id: &'a str,
     pub require_signatures: bool,
-    pub key: Option<&'a VerifyingKey>,
+    /// Verifying keys of the profile; empty when none is loaded.
+    pub keys: &'a [VerifyingKey],
     pub nonces: &'a NonceCache,
     pub now: DateTime<Utc>,
 }
@@ -272,7 +298,7 @@ pub fn verify_queued_command(
         .as_deref()
         .ok_or(QueueSignatureError::Incomplete)?;
 
-    let Some(key) = ctx.key else {
+    if ctx.keys.is_empty() {
         if ctx.require_signatures {
             return Err(QueueSignatureError::NoKey);
         }
@@ -280,7 +306,7 @@ pub fn verify_queued_command(
             args: parse_payload(payload)?,
             signed: false,
         });
-    };
+    }
 
     let ts: DateTime<Utc> = timestamp
         .parse()
@@ -303,8 +329,9 @@ pub fn verify_queued_command(
         nonce,
         payload,
     );
-    key.verify(message.as_bytes(), &signature)
-        .map_err(|_| QueueSignatureError::Invalid)?;
+    if !verify_any(ctx.keys, message.as_bytes(), &signature) {
+        return Err(QueueSignatureError::Invalid);
+    }
 
     if !ctx.nonces.check_and_insert(nonce, ctx.now) {
         return Err(QueueSignatureError::DuplicateNonce);

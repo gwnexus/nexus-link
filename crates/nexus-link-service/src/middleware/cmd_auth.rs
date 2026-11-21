@@ -6,7 +6,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, Duration, Utc};
-use ed25519_dalek::Verifier;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use tracing::warn;
@@ -20,13 +19,13 @@ use crate::state::SharedState;
 ///
 /// Behavior matrix:
 /// ┌───────────────────────┬───────────────┬────────────────┬──────────────────────┐
-/// │ require_signatures    │ signing_pubkey│ write op       │ result               │
+/// │ require_signatures    │ signing keys  │ write op       │ result               │
 /// ├───────────────────────┼───────────────┼────────────────┼──────────────────────┤
 /// │ false                 │ any           │ any            │ skip sig check       │
-/// │ true                  │ None          │ any            │ 403 — key not loaded │
-/// │ true                  │ Some          │ missing headers│ 403 — sig required   │
-/// │ true                  │ Some          │ bad timestamp  │ 403 — replay         │
-/// │ true                  │ Some          │ valid sig      │ 200 proceed          │
+/// │ true                  │ none          │ any            │ 403 — key not loaded │
+/// │ true                  │ 1 or 2        │ missing headers│ 403 — sig required   │
+/// │ true                  │ 1 or 2        │ bad timestamp  │ 403 — replay         │
+/// │ true                  │ 1 or 2        │ valid sig (any)│ 200 proceed          │
 /// │ any                   │ any           │ GET            │ skip sig check       │
 /// └───────────────────────┴───────────────┴────────────────┴──────────────────────┘
 #[allow(clippy::result_large_err)] // axum middleware requires Result<Response, Response>
@@ -79,15 +78,15 @@ pub async fn require_cmd_auth(
 
     // -----------------------------------------------------------------------
     // Gate 2: Ed25519 signature verification for write operations.
-    //   Only active when require_signatures = true AND signing_pubkey is loaded.
+    //   Only active when require_signatures = true. A signature is valid if any
+    //   of the profile's keys verifies it (ADR-0008).
     // -----------------------------------------------------------------------
     let method = req.method().clone();
     let is_write = method == Method::PUT || method == Method::POST;
 
     if is_write && state.config.compose.require_signatures {
-        let pubkey = match &state.signing_pubkey {
-            Some(k) => k,
-            None => {
+        let pubkeys = match state.signing_pubkeys.as_slice() {
+            [] => {
                 warn!("C&C auth: require_signatures=true but no Ed25519 key loaded");
                 return Err((
                     StatusCode::FORBIDDEN,
@@ -98,6 +97,7 @@ pub async fn require_cmd_auth(
                 )
                     .into_response());
             }
+            keys => keys,
         };
 
         // Extract signature headers
@@ -192,7 +192,8 @@ pub async fn require_cmd_auth(
                 };
 
                 let signature = ed25519_dalek::Signature::from_bytes(&sig_bytes);
-                if pubkey.verify(canonical.as_bytes(), &signature).is_err() {
+                if !nexus_link_core::signing::verify_any(pubkeys, canonical.as_bytes(), &signature)
+                {
                     warn!("C&C auth: Ed25519 signature verification failed");
                     return Err((
                         StatusCode::FORBIDDEN,

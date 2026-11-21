@@ -13,6 +13,39 @@ it is built against (ADR-0006): nexus-link `0.21.x` targets Nexus Hub `0.21.x`.
 this alignment only; versions 0.12.0 to 0.20.x do not exist. Releases up to
 0.11.0 used independent numbering.
 
+## [Unreleased]
+
+### Added
+
+- **Per-profile command signing keys** (ADR-0008). Each profile verifies HTTP
+  writes and queued commands against the keys in its own config, so
+  production and staging on one host can use different hub keypairs.
+- **Key rotation**: `compose.signing_public_keys` takes up to two keys; a
+  command is accepted if any of them verifies it, so a hub can switch keys
+  without a window of failing signed commands.
+- **Heartbeat `signing_key_fingerprints`**: SHA-256 of each loaded key (raw
+  32 bytes, first 16 hex), so the hub can check which key a profile uses.
+- **`register --replace-signing-key`**: replace a configured key of the
+  profile that differs from the hub's key.
+- `config set` / `config get` for `compose.signing_public_keys`; `config
+  set` validates keys before saving.
+
+### Changed
+
+- **Key precedence**: `compose.signing_public_keys`, then
+  `compose.signing_public_key`, then `signing_key.pub` (now only a fallback
+  for a profile without a key in its config). Before, the shared
+  `signing_key.pub` won, so every profile on a host used the same key. An
+  invalid config key no longer falls through to the file. For existing nodes
+  nothing changes unless their config key was edited by hand to differ from
+  `signing_key.pub`.
+- `register` and `config set compose.signing_public_key` no longer write or
+  delete the shared `signing_key.pub`; re-registering one profile can no
+  longer change another profile's key. `register` keeps a configured,
+  differing key and warns instead of overwriting it.
+- Setting `compose.signing_public_key` clears `compose.signing_public_keys`
+  (ends a rotation).
+
 ## [0.21.5] - 2026-11-17
 
 ### Added

@@ -6,7 +6,9 @@ use nexus_link_core::heartbeat::{
     HeartbeatPayload, HeartbeatResponse, ModelEntry, apply_backing_models, model_info_endpoint,
     models_endpoint, parse_model_info, parse_model_list,
 };
-use nexus_link_core::signing::{SignatureState, load_verifying_key, signature_state};
+use nexus_link_core::signing::{
+    SignatureState, key_fingerprint, load_verifying_keys, signature_state,
+};
 use tracing::{debug, info, warn};
 
 /// Timeout for the local runtime's model list.
@@ -112,22 +114,28 @@ async fn fetch_model_info(
     }
 }
 
-/// Command signature enforcement as the service applies it: same config
-/// flag and same key sources (`signing_key.pub`, then config).
-pub fn command_signature_state(config: &Config) -> SignatureState {
-    let key = load_verifying_key(&config.compose, &signing_key_dirs());
-    signature_state(config.compose.require_signatures, &key)
+/// Command signature enforcement as the service applies it, and the
+/// fingerprints of the loaded keys: same config flag and same key sources
+/// (ADR-0008, `load_verifying_keys`).
+pub fn command_signature_state(config: &Config) -> (SignatureState, Vec<String>) {
+    let keys = load_verifying_keys(&config.compose, &signing_key_dirs());
+    let fingerprints = keys.keys().iter().map(key_fingerprint).collect();
+    (
+        signature_state(config.compose.require_signatures, &keys),
+        fingerprints,
+    )
 }
 
 /// Send one `online` heartbeat, including the model inventory when known
 /// and the command signature enforcement state.
 pub async fn send_heartbeat(client: &reqwest::Client, config: &Config) -> anyhow::Result<()> {
     let models = fetch_models(client, config).await;
-    let signatures = command_signature_state(config);
+    let (signatures, fingerprints) = command_signature_state(config);
     let wake_listener = nexus_link_core::wake::state_dir_from_env()
         .and_then(|dir| nexus_link_core::wake::read_state(&dir, std::time::SystemTime::now()));
     let payload = HeartbeatPayload::online(models)
         .with_command_signatures(signatures)
+        .with_signing_key_fingerprints(fingerprints)
         .with_compose_writable(config.compose.writable)
         .with_wake_listener(wake_listener);
 

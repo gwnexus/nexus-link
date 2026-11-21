@@ -296,6 +296,7 @@ pub fn dirs_home() -> PathBuf {
 /// dir                = "/opt/dgx-llm"
 /// extra_extensions   = [".env", ".conf", ".toml"]
 /// signing_public_key = "..."
+/// # signing_public_keys = ["<new>", "<old>"]  # rotation, wins over the above
 /// require_signatures = false
 /// writable           = true
 /// ```
@@ -454,8 +455,15 @@ pub struct ComposeConfig {
     pub cmd_token: Option<String>,
 
     /// Ed25519 public key (base64url, 32 bytes) for signed command verification.
+    /// Takes precedence over `signing_key.pub` (ADR-0008).
     #[serde(default)]
     pub signing_public_key: Option<String>,
+
+    /// Up to two Ed25519 public keys for a hub key rotation (ADR-0008): a
+    /// command is accepted if any of them verifies it. Takes precedence over
+    /// `signing_public_key`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_public_keys: Option<Vec<String>>,
 
     /// Enforce Ed25519 signatures on write operations (default: false).
     #[serde(default)]
@@ -471,6 +479,55 @@ pub struct ComposeConfig {
     pub writable: bool,
 }
 
+/// Signing keys of a profile after `register` (ADR-0008).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisteredSigningKeys {
+    pub signing_public_key: Option<String>,
+    pub signing_public_keys: Option<Vec<String>>,
+    /// The profile already had a different key and kept it, because
+    /// `--replace-signing-key` was not given.
+    pub kept_existing: bool,
+}
+
+/// Decide which signing keys a profile keeps when it is (re-)registered
+/// (ADR-0008). The hub's key is taken when the profile has no key in its
+/// config or `replace` is set. A configured key that already matches the
+/// hub's key is kept unchanged (including a rotation list). A configured key
+/// that differs is kept and reported, never overwritten silently. When the
+/// hub sends no key, the configured keys stay.
+pub fn registered_signing_keys(
+    existing: Option<&ComposeConfig>,
+    hub_key: Option<&str>,
+    replace: bool,
+) -> RegisteredSigningKeys {
+    let hub = || RegisteredSigningKeys {
+        signing_public_key: hub_key.map(str::to_string),
+        signing_public_keys: None,
+        kept_existing: false,
+    };
+    let Some(existing) = existing else {
+        return hub();
+    };
+    let configured: Vec<&str> = match (&existing.signing_public_keys, &existing.signing_public_key)
+    {
+        (Some(list), _) => list.iter().map(|k| k.trim()).collect(),
+        (None, Some(k)) => vec![k.trim()],
+        (None, None) => vec![],
+    };
+    if configured.is_empty() || (replace && hub_key.is_some()) {
+        return hub();
+    }
+    let keep = |kept_existing| RegisteredSigningKeys {
+        signing_public_key: existing.signing_public_key.clone(),
+        signing_public_keys: existing.signing_public_keys.clone(),
+        kept_existing,
+    };
+    match hub_key {
+        Some(h) if !configured.contains(&h.trim()) => keep(true),
+        _ => keep(false),
+    }
+}
+
 /// Error for a compose write on a node with `compose.writable = false`.
 /// Reported to the hub as the command error.
 pub const COMPOSE_READ_ONLY_ERROR: &str =
@@ -483,6 +540,7 @@ impl Default for ComposeConfig {
             extra_extensions: default_compose_extra_extensions(),
             cmd_token: None,
             signing_public_key: None,
+            signing_public_keys: None,
             require_signatures: false,
             writable: true,
         }

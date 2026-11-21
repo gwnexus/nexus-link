@@ -1341,8 +1341,10 @@ dependencies = [
  "hex",
  "nexus-link-core",
  "serde_json",
+ "sha2 0.11.0",
  "tempfile",
  "tokio",
+ "toml",
 ]
 
 [[package]]

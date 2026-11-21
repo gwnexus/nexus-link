@@ -3,8 +3,9 @@ use ed25519_dalek::{Signer, SigningKey};
 use nexus_link_core::config::ComposeConfig;
 use nexus_link_core::heartbeat::HeartbeatPayload;
 use nexus_link_core::signing::{
-    KeyLoad, NonceCache, QueueSignatureError, SIGNATURE_WINDOW_SECS, SignatureState, VerifyContext,
-    load_verifying_key, queue_message, signature_state, verify_queued_command,
+    KeyLoad, MAX_SIGNING_KEYS, NonceCache, QueueSignatureError, SIGNATURE_WINDOW_SECS,
+    SignatureState, VerifyContext, key_fingerprint, load_verifying_keys, queue_message,
+    signature_state, verify_queued_command,
 };
 use nexus_link_core::types::{ComposeCommandItem, ComposeCommandType};
 use serde_json::json;
@@ -65,7 +66,7 @@ fn verify(
         &VerifyContext {
             node_id: NODE,
             require_signatures: require,
-            key,
+            keys: key.map(std::slice::from_ref).unwrap_or(&[]),
             nonces,
             now: now(),
         },
@@ -379,7 +380,7 @@ fn test_signed_queue_item_deserializes() {
 
 #[test]
 fn test_signature_state_matrix() {
-    let key = KeyLoad::Loaded(signing_key().verifying_key());
+    let key = KeyLoad::Loaded(vec![signing_key().verifying_key()]);
     assert_eq!(signature_state(true, &key), SignatureState::Enforced);
     assert_eq!(signature_state(false, &key), SignatureState::Off);
     assert_eq!(
@@ -405,26 +406,33 @@ fn test_load_verifying_key_sources() {
     let mut config = ComposeConfig::default();
 
     assert!(matches!(
-        load_verifying_key(&config, &[home.path().to_path_buf()]),
+        load_verifying_keys(&config, &[home.path().to_path_buf()]),
         KeyLoad::Missing
     ));
 
     config.signing_public_key = Some(b64.clone());
     assert!(matches!(
-        load_verifying_key(&config, &[home.path().to_path_buf()]),
+        load_verifying_keys(&config, &[home.path().to_path_buf()]),
         KeyLoad::Loaded(_)
     ));
 
     config.signing_public_key = Some("not-a-key".into());
     assert!(matches!(
-        load_verifying_key(&config, &[home.path().to_path_buf()]),
+        load_verifying_keys(&config, &[home.path().to_path_buf()]),
         KeyLoad::Invalid("compose.signing_public_key")
     ));
 
-    // The key file wins over the config value
+    // An invalid config key does not fall through to the key file (ADR-0008)
     std::fs::write(home.path().join("signing_key.pub"), format!("{b64}\n")).unwrap();
     assert!(matches!(
-        load_verifying_key(&config, &[home.path().to_path_buf()]),
+        load_verifying_keys(&config, &[home.path().to_path_buf()]),
+        KeyLoad::Invalid("compose.signing_public_key")
+    ));
+
+    // Without a config key the file is the fallback
+    config.signing_public_key = None;
+    assert!(matches!(
+        load_verifying_keys(&config, &[home.path().to_path_buf()]),
         KeyLoad::Loaded(_)
     ));
 }
@@ -459,7 +467,7 @@ fn test_load_verifying_key_search_order() {
     // Key only in a later dir (e.g. /var/lib/nexus-link from `setup`)
     std::fs::write(state.path().join("signing_key.pub"), &b64).unwrap();
     assert!(matches!(
-        load_verifying_key(&config, &dirs),
+        load_verifying_keys(&config, &dirs),
         KeyLoad::Loaded(_)
     ));
 
@@ -467,7 +475,180 @@ fn test_load_verifying_key_search_order() {
     // not silently skipped in favor of the next file
     std::fs::write(etc.path().join("signing_key.pub"), "garbage").unwrap();
     assert!(matches!(
-        load_verifying_key(&config, &dirs),
+        load_verifying_keys(&config, &dirs),
         KeyLoad::Invalid("signing_key.pub")
     ));
+}
+
+// ---------------------------------------------------------------------------
+// Per-profile keys and rotation (ADR-0008)
+// ---------------------------------------------------------------------------
+
+fn b64(key: &SigningKey) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key.verifying_key().to_bytes())
+}
+
+fn prod_key() -> SigningKey {
+    SigningKey::from_bytes(&[11u8; 32])
+}
+
+fn staging_key() -> SigningKey {
+    SigningKey::from_bytes(&[22u8; 32])
+}
+
+fn put_file_signed_by(key: &SigningKey, nonce: &str) -> ComposeCommandItem {
+    signed_item(
+        key,
+        NODE,
+        "cmd-1",
+        ComposeCommandType::PutFile,
+        r#"{"content":"services: {}"}"#,
+        now(),
+        nonce,
+    )
+}
+
+fn verify_with(
+    cmd: &ComposeCommandItem,
+    keys: &[ed25519_dalek::VerifyingKey],
+) -> Result<nexus_link_core::signing::VerifiedCommand, QueueSignatureError> {
+    verify_queued_command(
+        cmd,
+        &VerifyContext {
+            node_id: NODE,
+            require_signatures: true,
+            keys,
+            nonces: &NonceCache::new(),
+            now: now(),
+        },
+    )
+}
+
+#[test]
+fn test_config_key_wins_over_shared_key_file() {
+    // The shared /etc/nexus-link/signing_key.pub holds the old common key
+    let shared = tempfile::tempdir().unwrap();
+    std::fs::write(shared.path().join("signing_key.pub"), b64(&signing_key())).unwrap();
+    let dirs = [shared.path().to_path_buf()];
+
+    let config = ComposeConfig {
+        signing_public_key: Some(b64(&prod_key())),
+        ..ComposeConfig::default()
+    };
+    let load = load_verifying_keys(&config, &dirs);
+    assert_eq!(load.keys(), &[prod_key().verifying_key()]);
+}
+
+#[test]
+fn test_profiles_on_one_node_refuse_each_others_keys() {
+    // Both profiles share the key dirs (and a legacy signing_key.pub) but
+    // carry their own key in their config.
+    let shared = tempfile::tempdir().unwrap();
+    std::fs::write(shared.path().join("signing_key.pub"), b64(&signing_key())).unwrap();
+    let dirs = [shared.path().to_path_buf()];
+
+    let production = ComposeConfig {
+        signing_public_key: Some(b64(&prod_key())),
+        ..ComposeConfig::default()
+    };
+    let staging = ComposeConfig {
+        signing_public_key: Some(b64(&staging_key())),
+        ..ComposeConfig::default()
+    };
+    let prod_keys = load_verifying_keys(&production, &dirs);
+    let staging_keys = load_verifying_keys(&staging, &dirs);
+
+    // Each profile accepts its own key
+    assert!(verify_with(&put_file_signed_by(&prod_key(), "p1"), prod_keys.keys()).is_ok());
+    assert!(
+        verify_with(
+            &put_file_signed_by(&staging_key(), "s1"),
+            staging_keys.keys()
+        )
+        .is_ok()
+    );
+
+    // ... and refuses the other profile's key, in both directions
+    assert_eq!(
+        verify_with(&put_file_signed_by(&staging_key(), "s2"), prod_keys.keys()),
+        Err(QueueSignatureError::Invalid)
+    );
+    assert_eq!(
+        verify_with(&put_file_signed_by(&prod_key(), "p2"), staging_keys.keys()),
+        Err(QueueSignatureError::Invalid)
+    );
+
+    // The old shared key no longer works on either profile
+    for keys in [prod_keys.keys(), staging_keys.keys()] {
+        assert_eq!(
+            verify_with(&put_file_signed_by(&signing_key(), "x"), keys),
+            Err(QueueSignatureError::Invalid)
+        );
+    }
+}
+
+#[test]
+fn test_rotation_list_accepts_both_keys_and_wins_over_single_key() {
+    let new = SigningKey::from_bytes(&[33u8; 32]);
+    let config = ComposeConfig {
+        signing_public_key: Some(b64(&staging_key())),
+        signing_public_keys: Some(vec![b64(&new), b64(&prod_key())]),
+        ..ComposeConfig::default()
+    };
+    let load = load_verifying_keys(&config, &[]);
+    assert_eq!(load.keys().len(), 2);
+
+    assert!(verify_with(&put_file_signed_by(&new, "n1"), load.keys()).is_ok());
+    assert!(verify_with(&put_file_signed_by(&prod_key(), "o1"), load.keys()).is_ok());
+    // signing_public_key is ignored while the list is set
+    assert_eq!(
+        verify_with(&put_file_signed_by(&staging_key(), "s1"), load.keys()),
+        Err(QueueSignatureError::Invalid)
+    );
+}
+
+#[test]
+fn test_invalid_rotation_list_does_not_fall_through() {
+    let mut config = ComposeConfig {
+        signing_public_key: Some(b64(&prod_key())),
+        ..ComposeConfig::default()
+    };
+    let too_many: Vec<String> = (0..=MAX_SIGNING_KEYS as u8)
+        .map(|i| b64(&SigningKey::from_bytes(&[40 + i; 32])))
+        .collect();
+    for list in [vec![], vec![b64(&prod_key()), "garbage".into()], too_many] {
+        config.signing_public_keys = Some(list);
+        let load = load_verifying_keys(&config, &[]);
+        assert!(matches!(
+            load,
+            KeyLoad::Invalid("compose.signing_public_keys")
+        ));
+        assert_eq!(signature_state(true, &load), SignatureState::KeyMissing);
+    }
+}
+
+#[test]
+fn test_key_fingerprint_format() {
+    use sha2::{Digest, Sha256};
+    let vk = prod_key().verifying_key();
+    let fp = key_fingerprint(&vk);
+    assert_eq!(fp.len(), 16);
+    assert_eq!(fp, hex::encode(Sha256::digest(vk.as_bytes()))[..16]);
+    assert_ne!(fp, key_fingerprint(&staging_key().verifying_key()));
+}
+
+#[test]
+fn test_heartbeat_reports_signing_key_fingerprints() {
+    let body = serde_json::to_value(HeartbeatPayload::online(None)).unwrap();
+    assert!(body.get("signing_key_fingerprints").is_none());
+    let body = serde_json::to_value(
+        HeartbeatPayload::online(None)
+            .with_signing_key_fingerprints(vec!["e9aab7cd5a2b120e".into()]),
+    )
+    .unwrap();
+    assert_eq!(
+        body["signing_key_fingerprints"],
+        json!(["e9aab7cd5a2b120e"])
+    );
 }
